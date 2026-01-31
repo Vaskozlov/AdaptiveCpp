@@ -56,6 +56,7 @@ public:
 
   virtual cl_int enable_indirect_usm_access(cl::Kernel&) = 0;
 
+  static std::unique_ptr<ocl_usm> default_allocator(ocl_hardware_manager *hw_mgr, int dev_id);
   static std::unique_ptr<ocl_usm> from_intel_extension(ocl_hardware_manager* hw_mgr, int device_index);
   static std::unique_ptr<ocl_usm> from_fine_grained_system_svm(ocl_hardware_manager* hw_mgr, int device_index);
 };
