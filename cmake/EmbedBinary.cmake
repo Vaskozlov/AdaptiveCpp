@@ -1,5 +1,4 @@
-# Generate build-local C++ data from the caller-supplied NVIDIA bitcode.
-# No NVIDIA files are copied into the source tree or patch.
+# Generate build-local C++ data from bundled or caller-supplied NVIDIA bitcode.
 if(NOT EXISTS "${INPUT}")
   message(FATAL_ERROR "Cannot embed missing file: ${INPUT}")
 endif()

@@ -125,11 +125,12 @@ option(ACPP_EMBED_CUDA_LIBDEVICE "Embed libdevice in the PTX JIT library" ${ACPP
 # Check for CUDA/ROCm and clang
 list(INSERT CMAKE_MODULE_PATH 0 "${ACPP_SOURCE_ROOT}/cmake/")
 if(ACPP_CUDA_DRIVER_ONLY)
-  find_path(ACPP_CUDA_DRIVER_INCLUDE_DIR cuda.h
-    DOC "Directory containing the standalone NVIDIA driver API header cuda.h")
-  if(NOT ACPP_CUDA_DRIVER_INCLUDE_DIR)
-    message(FATAL_ERROR "Driver-only CUDA requires cuda.h; set ACPP_CUDA_DRIVER_INCLUDE_DIR")
+  set(ACPP_CUDA_DRIVER_INCLUDE_DIR "${ACPP_SOURCE_ROOT}/third-party/nvidia/include"
+    CACHE PATH "Directory containing the NVIDIA driver API header cuda.h")
+  if(NOT EXISTS "${ACPP_CUDA_DRIVER_INCLUDE_DIR}/cuda.h")
+    message(FATAL_ERROR "Driver-only CUDA requires cuda.h in ACPP_CUDA_DRIVER_INCLUDE_DIR=${ACPP_CUDA_DRIVER_INCLUDE_DIR}")
   endif()
+  message(STATUS "Using CUDA driver headers: ${ACPP_CUDA_DRIVER_INCLUDE_DIR}")
   set(CUDA_FOUND TRUE)
   set(CUDA_INCLUDE_DIRS "${ACPP_CUDA_DRIVER_INCLUDE_DIR}")
   set(CUDA_LIBS "")
@@ -544,6 +545,10 @@ endif()
 
 if(WITH_CUDA_BACKEND)
   set(ACPP_CUDA_LIBDEVICE "" CACHE FILEPATH "Path to the libdevice.10.bc file to embed")
+  if(ACPP_CUDA_DRIVER_ONLY AND NOT ACPP_CUDA_LIBDEVICE AND NOT CUDA_DEVICE_LIBS_PATH)
+    set(ACPP_CUDA_LIBDEVICE "${ACPP_SOURCE_ROOT}/third-party/nvidia/libdevice/libdevice.10.bc"
+      CACHE FILEPATH "Path to the libdevice.10.bc file to embed" FORCE)
+  endif()
   if(ACPP_CUDA_LIBDEVICE)
     if(NOT EXISTS "${ACPP_CUDA_LIBDEVICE}")
       message(FATAL_ERROR "ACPP_CUDA_LIBDEVICE does not exist: ${ACPP_CUDA_LIBDEVICE}")

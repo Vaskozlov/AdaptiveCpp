@@ -27,6 +27,10 @@ endif()
 
 install(FILES "${ACPP_SOURCE_ROOT}/LICENSE"
   DESTINATION share/licenses/AdaptiveCpp COMPONENT Runtime)
+if(WITH_CUDA_BACKEND)
+  install(FILES "${ACPP_SOURCE_ROOT}/third-party/nvidia/NOTICE.txt"
+    DESTINATION share/licenses/AdaptiveCpp/nvidia COMPONENT Runtime)
+endif()
 
 set(CPACK_PACKAGE_NAME "AdaptiveCpp")
 set(CPACK_PACKAGE_VENDOR "AdaptiveCpp")

@@ -1,11 +1,12 @@
 # NVIDIA driver API builds without the CUDA toolkit
 
-AdaptiveCpp can build its NVIDIA runtime backend using only a standalone
-`cuda.h` and `libdevice.10.bc`. Neither nvcc, CUDA runtime headers, libcudart,
-nor an installed NVIDIA driver is needed on the build machine. LLVM/Clang
+AdaptiveCpp includes `cuda.h` and `libdevice.10.bc` in `third-party/nvidia`
+and uses them by default for driver-only builds. Neither nvcc, CUDA runtime
+headers, libcudart, nor an installed NVIDIA driver is needed on the build machine. LLVM/Clang
 development files, the NVPTX LLVM target, LLVM tools and OpenMP are still needed.
 Use a supported LLVM version as for an ordinary full AdaptiveCpp installation.
-The supplied CUDA 11.8 header is sufficient.
+The bundled driver header targets CUDA 11.8. No additional NVIDIA files or
+network downloads are needed to build this configuration.
 
 On the execution machine, the backend loads the system NVIDIA driver's
 `libcuda.so.1`. An absent driver or an incompatible driver exposes no CUDA
@@ -36,8 +37,6 @@ cmake -S . -B build-driver -G Ninja \
   -DLLVM_DIR=/usr/lib/llvm-19/lib/cmake/llvm \
   -DACPP_COMPILER_FEATURE_PROFILE=full \
   -DACPP_CUDA_DRIVER_ONLY=ON \
-  -DACPP_CUDA_DRIVER_INCLUDE_DIR=/path/containing/cuda-header \
-  -DACPP_CUDA_LIBDEVICE=/path/to/libdevice.10.bc \
   -DACPP_EMBED_CUDA_LIBDEVICE=ON \
   -DWITH_CUDA_BACKEND=ON \
   -DWITH_ROCM_BACKEND=OFF \
@@ -51,16 +50,24 @@ cmake --build build-driver --parallel
 ctest --test-dir build-driver --output-on-failure
 ```
 
-The include-directory option names the directory containing `cuda.h`, not the
-file itself. These NVIDIA inputs remain external build inputs. They are not
-added to the repository, headers installation, or patch. Embedding places the
-libdevice bytes inside `llvm-to-ptx`; the JIT then links them directly from
+The source checkout and exported binary-capable patch contain both NVIDIA
+build inputs. Their checksums and licensing notices are recorded in
+[`third-party/nvidia/README.md`](../third-party/nvidia/README.md). The original
+NVIDIA notices are preserved and installed with the runtime package; these
+files retain their NVIDIA licensing.
+
+To use different files, set `ACPP_CUDA_DRIVER_INCLUDE_DIR` to the directory
+containing `cuda.h`, and `ACPP_CUDA_LIBDEVICE` to a bitcode file. Alternatively,
+`CUDA_DEVICE_LIBS_PATH` can select a bitcode directory when no explicit bitcode
+file is set. Use a fresh build directory or clear an earlier cached
+`ACPP_CUDA_LIBDEVICE` before switching to the directory option.
+
+Embedding places the libdevice bytes inside `llvm-to-ptx`; the JIT then links them directly from
 memory. The source bitcode file and its original directory are not needed when
 executing compiled applications. Changing the input bitcode rebuilds the
 embedded data and library.
 
-`ACPP_EMBED_CUDA_LIBDEVICE` defaults to ON for driver-only builds. Alternatively,
-`CUDA_DEVICE_LIBS_PATH` can name the directory containing `libdevice.10.bc`.
+`ACPP_EMBED_CUDA_LIBDEVICE` defaults to ON for driver-only builds.
 If embedding is explicitly disabled, the existing runtime file discovery is
 used. Do not disable embedding when a runtime filesystem dependency on
 libdevice is undesirable.

@@ -1,0 +1,3 @@
+# Preserve supplied assets, including the vendor header's original whitespace.
+include/cuda.h -text -whitespace
+libdevice/libdevice.10.bc -text
