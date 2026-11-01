@@ -1983,6 +1983,12 @@ class compiler:
     self._is_dry_run = config.is_dryrun or config.is_dryrun_only_std_flags
     self._only_std_flags = config.is_dryrun_only_std_flags
     self._targets = config.targets
+    if (config._config_db.contains_key("cuda-driver-only") and
+        config._interpret_flag(config._config_db.get("cuda-driver-only"))):
+      allowed_targets = {"generic", "sscp", "omp", "omp.library-only", "omp.accelerated"}
+      if any(target not in allowed_targets for target in self._targets):
+        raise RuntimeError("This driver-only build supports --acpp-targets=generic or omp; "
+                           "legacy CUDA/HIP compiler targets require a toolkit build.")
     self._common_compiler_args = config.common_compiler_args
     self._acpp_path = config.acpp_installation_path
     self._acpp_lib_path = os.path.join(self._acpp_path, "lib/")

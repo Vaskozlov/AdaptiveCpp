@@ -1,5 +1,8 @@
 # AdaptiveCpp installation instructions for CUDA
 
+For a build without the CUDA toolkit using `generic` and OpenMP, see the
+[driver-only installation and DEB packaging instructions](install-cuda-driver.md).
+
 ## If using clang
 
 Please install CUDA 10.0 or later.

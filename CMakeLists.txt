@@ -117,10 +117,28 @@ if(NOT HIPSYCL_DEBUG_LEVEL)
   endif()
 endif()
 
+# Installation components are shared by ordinary installs and CPack.
+set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME Development)
+option(ACPP_CUDA_DRIVER_ONLY "Build NVIDIA support without the CUDA toolkit (generic compilation only)" OFF)
+option(ACPP_EMBED_CUDA_LIBDEVICE "Embed libdevice in the PTX JIT library" ${ACPP_CUDA_DRIVER_ONLY})
+
 # Check for CUDA/ROCm and clang
 list(INSERT CMAKE_MODULE_PATH 0 "${ACPP_SOURCE_ROOT}/cmake/")
-find_package(CUDA QUIET)
-find_package(HIP QUIET HINTS ${ROCM_PATH} ${ROCM_PATH}/lib/cmake)
+if(ACPP_CUDA_DRIVER_ONLY)
+  find_path(ACPP_CUDA_DRIVER_INCLUDE_DIR cuda.h
+    DOC "Directory containing the standalone NVIDIA driver API header cuda.h")
+  if(NOT ACPP_CUDA_DRIVER_INCLUDE_DIR)
+    message(FATAL_ERROR "Driver-only CUDA requires cuda.h; set ACPP_CUDA_DRIVER_INCLUDE_DIR")
+  endif()
+  set(CUDA_FOUND TRUE)
+  set(CUDA_INCLUDE_DIRS "${ACPP_CUDA_DRIVER_INCLUDE_DIR}")
+  set(CUDA_LIBS "")
+elseif(NOT DEFINED WITH_CUDA_BACKEND OR WITH_CUDA_BACKEND)
+  find_package(CUDA QUIET)
+endif()
+if(NOT DEFINED WITH_ROCM_BACKEND OR WITH_ROCM_BACKEND)
+  find_package(HIP QUIET HINTS ${ROCM_PATH} ${ROCM_PATH}/lib/cmake)
+endif()
 
 #set(WITH_CUDA_NVCXX_ONLY FALSE CACHE BOOL "(Deprecated) Whether to target CUDA exclusively with nvc++")
 
@@ -200,14 +218,18 @@ message(STATUS "Building with compiler feature profile: ${ACPP_COMPILER_FEATURE_
 # Check for OpenCL unless user has explicitly set WITH_SSCP_COMPILER to False
 if (DEFINED WITH_SSCP_COMPILER)
   if (WITH_SSCP_COMPILER)
-    find_package(OpenCL QUIET)
+    if(NOT DEFINED WITH_OPENCL_BACKEND OR WITH_OPENCL_BACKEND)
+      find_package(OpenCL QUIET)
+    endif()
   endif()
 else()
   find_package(OpenCL QUIET)
 endif()
 
 # In case HIP is not found via the cmake pkgs we fall back to the legacy rocm discovery:
-if (NOT HIP_FOUND)
+if(DEFINED WITH_ROCM_BACKEND AND NOT WITH_ROCM_BACKEND)
+  set(ROCM_FOUND false)
+elseif (NOT HIP_FOUND)
   message(STATUS "Could not find HIP cmake integration, falling back to finding hipcc")
   find_program(HIPCC_COMPILER NAMES hipcc HINTS ${ROCM_PATH} ${ROCM_PATH}/bin)
   set(ROCM_PATH /opt/rocm CACHE PATH "Path to ROCm installation")
@@ -241,6 +263,15 @@ set(WITH_VULKAN_BACKEND OFF CACHE BOOL "Build AdaptiveCpp support for Vulkan") #
 
 set(WITH_CPU_BACKEND true)
 
+if(ACPP_CUDA_DRIVER_ONLY)
+  if(NOT WITH_CUDA_BACKEND OR NOT WITH_SSCP_COMPILER)
+    message(FATAL_ERROR "ACPP_CUDA_DRIVER_ONLY requires WITH_CUDA_BACKEND=ON and ACPP_COMPILER_FEATURE_PROFILE=full")
+  endif()
+  if(WITH_CUDA_NVCXX_ONLY)
+    message(FATAL_ERROR "nvc++ compilation is unavailable in driver-only builds; use generic or omp")
+  endif()
+endif()
+
 if(WITH_VULKAN_BACKEND)
   # The Android NDK doesn't come with the Vulkan SDK, only Vulkan, so we need to
   # find SPIRV-Tools separately
@@ -262,7 +293,7 @@ if(WITH_VULKAN_BACKEND)
   endif()
 endif()
 
-if(WITH_CUDA_BACKEND)
+if(WITH_CUDA_BACKEND AND NOT ACPP_CUDA_DRIVER_ONLY)
   find_program(NVCXX_COMPILER NAMES nvc++)
 endif()
 
@@ -512,9 +543,20 @@ endif()
 
 
 if(WITH_CUDA_BACKEND)
-  find_path(CUDA_DEVICE_LIBS_PATH libdevice.10.bc HINTS
+  set(ACPP_CUDA_LIBDEVICE "" CACHE FILEPATH "Path to the libdevice.10.bc file to embed")
+  if(ACPP_CUDA_LIBDEVICE)
+    if(NOT EXISTS "${ACPP_CUDA_LIBDEVICE}")
+      message(FATAL_ERROR "ACPP_CUDA_LIBDEVICE does not exist: ${ACPP_CUDA_LIBDEVICE}")
+    endif()
+    get_filename_component(CUDA_DEVICE_LIBS_PATH "${ACPP_CUDA_LIBDEVICE}" DIRECTORY)
+  else()
+    find_path(CUDA_DEVICE_LIBS_PATH libdevice.10.bc HINTS
       ${CUDA_TOOLKIT_ROOT_DIR}/nvvm/libdevice
       DOC "Path containing the CUDA bitcode libraries. Typically, $CUDA_PATH/nvvm/libdevice")
+    if(CUDA_DEVICE_LIBS_PATH)
+      set(ACPP_CUDA_LIBDEVICE "${CUDA_DEVICE_LIBS_PATH}/libdevice.10.bc")
+    endif()
+  endif()
 
   if(CUDA_DEVICE_LIBS_PATH)
     message(STATUS "Found CUDA bitcode library path: ${CUDA_DEVICE_LIBS_PATH}")
@@ -711,6 +753,7 @@ set(ACPP_CORE_CONFIG_FILE "{
   \"plugin-llvm-version-major\" : \"${PLUGIN_LLVM_VERSION_MAJOR}\",
   \"plugin-with-cpu-acceleration\" : \"${WITH_ACCELERATED_CPU}\",
   \"plugin-with-sscp-compiler\" : \"${WITH_SSCP_COMPILER}\",
+  \"cuda-driver-only\" : \"${ACPP_CUDA_DRIVER_ONLY}\",
   \"default-clang\"     : \"${CLANG_INSTALLED_PATH}\",
   \"default-targets\"  : \"${DEFAULT_TARGETS}\",
   \"default-cpu-cxx\"   : \"${CMAKE_CXX_COMPILER}\",
@@ -746,7 +789,7 @@ set(ACPP_ROCM_CONFIG_FILE "{
 ")
 
 file(WRITE ${ACPP_BINARY_ROOT}/acpp-core.json ${ACPP_CORE_CONFIG_FILE})
-if(WITH_CUDA_BACKEND)
+if(WITH_CUDA_BACKEND AND NOT ACPP_CUDA_DRIVER_ONLY)
   file(WRITE ${ACPP_BINARY_ROOT}/acpp-cuda.json ${ACPP_CUDA_CONFIG_FILE})
 endif()
 if(WITH_ROCM_BACKEND)
@@ -801,13 +844,21 @@ set(ACPP_CORE_DEPLOYMENT_MANIFEST "{
 }
 ")
 
-#TODO cudart for older cmake versions?
+set(ACPP_CUDA_DEPLOYMENT_DEVICE_LIBS "")
+if(NOT ACPP_EMBED_CUDA_LIBDEVICE)
+  set(ACPP_CUDA_DEPLOYMENT_DEVICE_LIBS
+    "  \"${CUDA_DEVICE_LIBS_PATH}/libdevice.10.bc\" : \"/hipSYCL/ext/bitcode/ptx\",\n")
+endif()
+set(ACPP_CUDA_DEPLOYMENT_CUDART "")
+if(NOT ACPP_CUDA_DRIVER_ONLY)
+  set(ACPP_CUDA_DEPLOYMENT_CUDART "${CUDA_cudart_LIBRARY}")
+endif()
 set(ACPP_CUDA_DEPLOYMENT_MANIFEST "{
   \"${ACPP_DEPLOYMENT_MAIN_LIB_PATH}/hipSYCL/SHARED_LIB:rt-backend-cuda\" : \"/hipSYCL\",
   \"${ACPP_DEPLOYMENT_LLVM_TO_PTX_LIB}\" : \"/hipSYCL/llvm-to-backend/\",
   \"$ACPP_LIB_PATH/hipSYCL/bitcode/libkernel-sscp-ptx-full.bc\" : \"/hipSYCL/bitcode/\",
-  \"${CUDA_DEVICE_LIBS_PATH}/libdevice.10.bc\" : \"/hipSYCL/ext/bitcode/ptx\",
-  \"${CUDA_cudart_LIBRARY}\" : \"/\"
+${ACPP_CUDA_DEPLOYMENT_DEVICE_LIBS}
+  \"${ACPP_CUDA_DEPLOYMENT_CUDART}\" : \"/\"
 }
 ")
 
@@ -916,7 +967,7 @@ install(PROGRAMS bin/acpp DESTINATION bin RENAME syclcc-clang)
 
 
 install(FILES ${ACPP_BINARY_ROOT}/acpp-core.json DESTINATION ${ACPP_CONFIG_FILE_INSTALL_DIR})
-if(WITH_CUDA_BACKEND)
+if(WITH_CUDA_BACKEND AND NOT ACPP_CUDA_DRIVER_ONLY)
   install(FILES ${ACPP_BINARY_ROOT}/acpp-cuda.json DESTINATION ${ACPP_CONFIG_FILE_INSTALL_DIR})
 endif()
 if(WITH_ROCM_BACKEND)
@@ -1077,3 +1128,14 @@ mark_as_advanced(
   ADAPTIVECPP_INSTALL_CMAKE_DIR
 )
 
+
+option(ACPP_BUILD_CUDA_DRIVER_TESTS "Build GPU-independent CUDA driver backend tests" OFF)
+if(ACPP_BUILD_CUDA_DRIVER_TESTS)
+  if(NOT WITH_CUDA_BACKEND OR WIN32)
+    message(FATAL_ERROR "CUDA driver tests require WITH_CUDA_BACKEND on a Unix host")
+  endif()
+  enable_testing()
+  add_subdirectory(tests/cuda_driver)
+endif()
+
+include(cmake/Packaging.cmake)

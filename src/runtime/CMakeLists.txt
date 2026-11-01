@@ -108,14 +108,15 @@ endif()
 install(TARGETS acpp-rt
         EXPORT install_exports
         INCLUDES DESTINATION include/AdaptiveCpp
-        RUNTIME DESTINATION bin
-        LIBRARY DESTINATION lib
-        ARCHIVE DESTINATION lib)
+        RUNTIME DESTINATION bin COMPONENT Runtime
+        LIBRARY DESTINATION lib COMPONENT Runtime
+        ARCHIVE DESTINATION lib COMPONENT Development)
 
 set(CMAKE_INSTALL_RPATH ${base}/../ ${base}/llvm-to-backend)
 
 if(WITH_CUDA_BACKEND)
   add_library(rt-backend-cuda SHARED
+    cuda/cuda_driver.cpp
     cuda/cuda_event.cpp
     cuda/cuda_event_pool.cpp
     cuda/cuda_queue.cpp
@@ -128,8 +129,11 @@ if(WITH_CUDA_BACKEND)
 
   target_include_directories(rt-backend-cuda PRIVATE
     ${HIPSYCL_SOURCE_DIR}/include
-    ${CUDA_TOOLKIT_ROOT_DIR}/include)
+    ${CUDA_INCLUDE_DIRS})
   target_link_libraries(rt-backend-cuda PRIVATE acpp-rt ${CUDA_LIBS})
+  if(ACPP_CUDA_DRIVER_ONLY)
+    target_compile_definitions(rt-backend-cuda PRIVATE ACPP_CUDA_DRIVER_ONLY)
+  endif()
 
   target_compile_options(rt-backend-cuda PRIVATE ${HIPSYCL_RT_EXTRA_CXX_FLAGS})
   target_link_libraries(rt-backend-cuda PRIVATE ${HIPSYCL_RT_EXTRA_LINKER_FLAGS})
@@ -148,9 +152,9 @@ if(WITH_CUDA_BACKEND)
   endif()
 
   install(TARGETS rt-backend-cuda
-        RUNTIME DESTINATION bin/hipSYCL
-        LIBRARY DESTINATION lib/hipSYCL
-        ARCHIVE DESTINATION lib/hipSYCL)
+        RUNTIME DESTINATION bin/hipSYCL COMPONENT Runtime
+        LIBRARY DESTINATION lib/hipSYCL COMPONENT Runtime
+        ARCHIVE DESTINATION lib/hipSYCL COMPONENT Development)
 endif()
 
 if(WITH_ROCM_BACKEND)
@@ -198,9 +202,9 @@ if(WITH_ROCM_BACKEND)
   endif()
 
   install(TARGETS rt-backend-hip
-        RUNTIME DESTINATION bin/hipSYCL
-        LIBRARY DESTINATION lib/hipSYCL
-        ARCHIVE DESTINATION lib/hipSYCL)
+        RUNTIME DESTINATION bin/hipSYCL COMPONENT Runtime
+        LIBRARY DESTINATION lib/hipSYCL COMPONENT Runtime
+        ARCHIVE DESTINATION lib/hipSYCL COMPONENT Development)
 endif()
 
 if(WITH_LEVEL_ZERO_BACKEND)
@@ -232,9 +236,9 @@ if(WITH_LEVEL_ZERO_BACKEND)
   endif()
 
   install(TARGETS rt-backend-ze
-        RUNTIME DESTINATION bin/hipSYCL
-        LIBRARY DESTINATION lib/hipSYCL
-        ARCHIVE DESTINATION lib/hipSYCL)
+        RUNTIME DESTINATION bin/hipSYCL COMPONENT Runtime
+        LIBRARY DESTINATION lib/hipSYCL COMPONENT Runtime
+        ARCHIVE DESTINATION lib/hipSYCL COMPONENT Development)
 endif()
 
 if(WITH_VULKAN_BACKEND)
@@ -285,9 +289,9 @@ if(WITH_VULKAN_BACKEND)
   endif()
 
   install(TARGETS rt-backend-vk
-        RUNTIME DESTINATION bin/hipSYCL
-        LIBRARY DESTINATION lib/hipSYCL
-        ARCHIVE DESTINATION lib/hipSYCL)
+        RUNTIME DESTINATION bin/hipSYCL COMPONENT Runtime
+        LIBRARY DESTINATION lib/hipSYCL COMPONENT Runtime
+        ARCHIVE DESTINATION lib/hipSYCL COMPONENT Development)
 
 endif() # WITH_VULKAN_BACKEND
 
@@ -342,9 +346,9 @@ if(WITH_OPENCL_BACKEND)
   endif()
 
   install(TARGETS rt-backend-ocl
-        RUNTIME DESTINATION bin/hipSYCL
-        LIBRARY DESTINATION lib/hipSYCL
-        ARCHIVE DESTINATION lib/hipSYCL)
+        RUNTIME DESTINATION bin/hipSYCL COMPONENT Runtime
+        LIBRARY DESTINATION lib/hipSYCL COMPONENT Runtime
+        ARCHIVE DESTINATION lib/hipSYCL COMPONENT Development)
 endif()
 
 if(WITH_CPU_BACKEND)
@@ -446,9 +450,9 @@ if(WITH_CPU_BACKEND)
   endif()
 
   install(TARGETS rt-backend-omp
-      RUNTIME DESTINATION bin/hipSYCL
-      LIBRARY DESTINATION lib/hipSYCL
-      ARCHIVE DESTINATION lib/hipSYCL)
+      RUNTIME DESTINATION bin/hipSYCL COMPONENT Runtime
+      LIBRARY DESTINATION lib/hipSYCL COMPONENT Runtime
+      ARCHIVE DESTINATION lib/hipSYCL COMPONENT Development)
 endif()
 
 if (WITH_METAL_BACKEND)
@@ -499,7 +503,7 @@ if (WITH_METAL_BACKEND)
   target_link_libraries(rt-backend-metal PRIVATE "-framework Metal" "-framework Foundation" "-framework CoreFoundation" "-framework IOKit" )
 
   install(TARGETS rt-backend-metal
-      RUNTIME DESTINATION bin/hipSYCL
-      LIBRARY DESTINATION lib/hipSYCL
-      ARCHIVE DESTINATION lib/hipSYCL)
+      RUNTIME DESTINATION bin/hipSYCL COMPONENT Runtime
+      LIBRARY DESTINATION lib/hipSYCL COMPONENT Runtime
+      ARCHIVE DESTINATION lib/hipSYCL COMPONENT Development)
 endif ()

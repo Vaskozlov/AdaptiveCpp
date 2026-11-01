@@ -8,6 +8,7 @@
  * See file LICENSE in the project root for full license details.
  */
 // SPDX-License-Identifier: BSD-2-Clause
+#include "cuda_driver.hpp"
 #include <sstream>
 #include <string>
 #include <algorithm>
@@ -15,8 +16,6 @@
 #include <cassert>
 #include <cfenv>
 
-#include <cuda_runtime_api.h>
-#include <cuda.h>
 
 #include "hipSYCL/common/hcf_container.hpp"
 #include "hipSYCL/runtime/kernel_configuration.hpp"
@@ -48,7 +47,7 @@ void unload_cuda_module(CUmod_st* module, int device) {
   if (module) {
     cuda_device_manager::get().activate_device(device);
 
-    auto err = cuModuleUnload(module);
+    auto err = cuda_driver::cuModuleUnload(module);
 
     if (err != CUDA_SUCCESS &&
         // It can happen that during shutdown of the CUDA
@@ -67,11 +66,6 @@ result build_cuda_module_from_ptx(CUmod_st *&module, int device,
                                   const std::string &source) {
 
   cuda_device_manager::get().activate_device(device);
-  // This guarantees that the CUDA runtime API initializes the CUDA
-  // context on that device. This is important for the subsequent driver
-  // API calls which assume that CUDA context has been created.
-  cudaFree(0);
-
   static constexpr std::size_t num_options = 2;
   std::array<CUjit_option, num_options> option_names{};
   std::array<void*, num_options> option_vals{};
@@ -90,7 +84,7 @@ result build_cuda_module_from_ptx(CUmod_st *&module, int device,
   std::fenv_t caller_fpe_env;
   std::feholdexcept(&caller_fpe_env);
 
-  auto err = cuModuleLoadDataEx(
+  auto err = cuda_driver::cuModuleLoadDataEx(
       &module, source.data(),
       num_options, option_names.data(), option_vals.data());
 

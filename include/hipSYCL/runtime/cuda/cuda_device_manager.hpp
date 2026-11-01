@@ -14,10 +14,9 @@
 namespace hipsycl {
 namespace rt {
 
-/// CUDA keeps track of the currently active device on a per-thread basis.
-/// The cuda_device_manager acts as a wrapper for this functionality.
-/// It is implemented as a per-thread singleton and assumes that
-/// no external calls to cudaSetDevice() are made by the user.
+/// Activates the device primary context on the calling thread.
+/// Hardware contexts own its lifetime. Rebind on every activation, including
+/// after external CUDA calls change the current context.
 class cuda_device_manager
 {
 public:
@@ -30,9 +29,9 @@ public:
   }
 
 private:
-  int _device;
+  int _device = -1;
 
-  cuda_device_manager();
+  cuda_device_manager() = default;
 };
 
 }

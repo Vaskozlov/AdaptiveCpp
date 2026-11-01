@@ -8,6 +8,7 @@
  * See file LICENSE in the project root for full license details.
  */
 // SPDX-License-Identifier: BSD-2-Clause
+#include "cuda_driver.hpp"
 #include "hipSYCL/runtime/cuda/cuda_hardware_manager.hpp"
 #include "hipSYCL/runtime/cuda/cuda_event_pool.hpp"
 #include "hipSYCL/runtime/cuda/cuda_allocator.hpp"
@@ -18,7 +19,6 @@
 #include "hipSYCL/runtime/settings.hpp"
 
 
-#include <cuda_runtime_api.h>
 #include <exception>
 #include <cstdlib>
 #include <limits>
@@ -26,12 +26,29 @@
 namespace hipsycl {
 namespace rt {
 
+struct cuda_device_properties {
+  char name[256]{};
+  std::size_t totalGlobalMem = 0;
+  int major = 0, minor = 0, multiProcessorCount = 0;
+  int maxGridSize[3]{}, maxThreadsDim[3]{};
+  int maxThreadsPerBlock = 0, warpSize = 1, concurrentKernels = 0;
+  int clockRate = 0, l2CacheSize = 0, totalConstMem = 0;
+  int sharedMemPerBlock = 0, managedMemory = 0;
+  CUcontext primary_context = nullptr;
+  int device = -1;
+
+  ~cuda_device_properties() {
+    if(primary_context)
+      cuda_driver::cuDevicePrimaryCtxRelease(device);
+  }
+};
+
 namespace
 {
 std::pair<int,int> get_stream_priority_bound() {
   int lowest, highest;
-  auto err = cudaDeviceGetStreamPriorityRange(&lowest, &highest);
-  if(err != cudaSuccess){
+  auto err = cuda_driver::cuCtxGetStreamPriorityRange(&lowest, &highest);
+  if(err != CUDA_SUCCESS){
     register_error(
         __acpp_here(),
         error_info{"cuda_hardware_manager: Could not query stream priority range",
@@ -57,11 +74,13 @@ cuda_hardware_manager::cuda_hardware_manager(hardware_platform hw_platform)
 
   int num_devices = 0;
 
-  auto err = cudaGetDeviceCount(&num_devices);
-  if (err != cudaSuccess) {
+  auto err = cuda_driver::initialize();
+  if(err == CUDA_SUCCESS)
+    err = cuda_driver::cuDeviceGetCount(&num_devices);
+  if (err != CUDA_SUCCESS) {
     num_devices = 0;
 
-    if(err != cudaErrorNoDevice) {
+    if(err != CUDA_ERROR_NO_DEVICE) {
       print_warning(
           __acpp_here(),
           error_info{"cuda_hardware_manager: Could not obtain number of devices",
@@ -79,12 +98,13 @@ cuda_hardware_manager::cuda_hardware_manager(hardware_platform hw_platform)
     for (int peer_dev = 0; peer_dev < num_devices; ++peer_dev) {
       if (peer_dev != dev) {
         int can_access;
-        err = cudaDeviceCanAccessPeer(&can_access, dev, peer_dev);
+        err = cuda_driver::cuDeviceCanAccessPeer(&can_access, dev, peer_dev);
 
-        if (err == cudaSuccess && can_access) {
-          err = cudaDeviceEnablePeerAccess(peer_dev, 0);
+        if (err == CUDA_SUCCESS && can_access) {
+          CUcontext peer_context = _devices[peer_dev]._properties->primary_context;
+          err = cuda_driver::cuCtxEnablePeerAccess(peer_context, 0);
 
-          if (err != cudaSuccess && err != cudaErrorPeerAccessAlreadyEnabled) {
+          if (err != CUDA_SUCCESS && err != CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED) {
             print_warning(
               __acpp_here(),
               error_info{"cuda_hardware_manager: Could not enable peer access",
@@ -133,14 +153,38 @@ std::size_t cuda_hardware_context::get_platform_index() const {
 
 cuda_hardware_context::cuda_hardware_context(int dev)
   : _dev{dev} {
-  _properties = std::make_unique<cudaDeviceProp>();
-  auto err = cudaGetDeviceProperties(_properties.get(), dev);
-
-  if (err != cudaSuccess) {
-    register_error(
-        __acpp_here(),
-        error_info{"cuda_hardware_manager: Could not query device properties ",
-                   error_code{"CUDA", err}});
+  _properties = std::make_unique<cuda_device_properties>();
+  _properties->device = dev;
+  auto check = [](CUresult err) {
+    if(err != CUDA_SUCCESS)
+      register_error(__acpp_here(), error_info{
+          "cuda_hardware_manager: Could not query device properties",
+          error_code{"CUDA", err}});
+  };
+  check(cuda_driver::cuDevicePrimaryCtxRetain(&_properties->primary_context, dev));
+  check(cuda_driver::cuDeviceGetName(_properties->name, sizeof(_properties->name), dev));
+  check(cuda_driver::cuDeviceTotalMem(&_properties->totalGlobalMem, dev));
+  auto attribute = [&](int &out, CUdevice_attribute attr) {
+    check(cuda_driver::cuDeviceGetAttribute(&out, attr, dev));
+  };
+  attribute(_properties->major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR);
+  attribute(_properties->minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR);
+  attribute(_properties->multiProcessorCount, CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT);
+  attribute(_properties->maxThreadsPerBlock, CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK);
+  attribute(_properties->warpSize, CU_DEVICE_ATTRIBUTE_WARP_SIZE);
+  attribute(_properties->concurrentKernels, CU_DEVICE_ATTRIBUTE_CONCURRENT_KERNELS);
+  attribute(_properties->clockRate, CU_DEVICE_ATTRIBUTE_CLOCK_RATE);
+  attribute(_properties->l2CacheSize, CU_DEVICE_ATTRIBUTE_L2_CACHE_SIZE);
+  attribute(_properties->totalConstMem, CU_DEVICE_ATTRIBUTE_TOTAL_CONSTANT_MEMORY);
+  attribute(_properties->sharedMemPerBlock, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK);
+  attribute(_properties->managedMemory, CU_DEVICE_ATTRIBUTE_MANAGED_MEMORY);
+  const CUdevice_attribute grid[] = {CU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_X,
+      CU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_Y, CU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_Z};
+  const CUdevice_attribute block[] = {CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_X,
+      CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Y, CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Z};
+  for(int i = 0; i < 3; ++i) {
+    attribute(_properties->maxGridSize[i], grid[i]);
+    attribute(_properties->maxThreadsDim[i], block[i]);
   }
 
   _allocator = std::make_unique<cuda_allocator>(
@@ -227,7 +271,7 @@ bool cuda_hardware_context::has(device_support_aspect aspect) const {
     return false;
     break;
   case device_support_aspect::usm_shared_allocations:
-    return true;
+    return _properties->managedMemory;
     break;
   case device_support_aspect::usm_atomic_shared_allocations:
     // TODO actually query this
@@ -265,6 +309,7 @@ bool cuda_hardware_context::has(device_support_aspect aspect) const {
 
 std::size_t
 cuda_hardware_context::get_property(device_uint_property prop) const {
+  cuda_device_manager::get().activate_device(_dev);
   switch (prop) {
   case device_uint_property::max_compute_units:
     return _properties->multiProcessorCount;
@@ -354,18 +399,7 @@ cuda_hardware_context::get_property(device_uint_property prop) const {
     return 2;
     break;
   case device_uint_property::max_clock_speed:
-#if CUDART_VERSION >= 13000
-    {
-      int clockRate = 0;
-      auto err = cudaDeviceGetAttribute(&clockRate, cudaDevAttrClockRate, _dev);
-      if (err == cudaSuccess)
-        return clockRate / 1000;
-      else
-        return 0;
-    }
-#else
     return _properties->clockRate / 1000;
-#endif
     break;
   case device_uint_property::max_malloc_size:
     return _properties->totalGlobalMem;
@@ -452,8 +486,8 @@ cuda_hardware_context::get_property(device_uint_property prop) const {
     {
       std::size_t free_bytes = 0;
       std::size_t total_bytes = 0;
-      auto err = cudaMemGetInfo(&free_bytes, &total_bytes);
-      if(err != cudaSuccess) {
+      auto err = cuda_driver::cuMemGetInfo(&free_bytes, &total_bytes);
+      if(err != CUDA_SUCCESS) {
         register_error(
             __acpp_here(),
             error_info{"cuda_hardware_manager: Querying free device memory failed",
@@ -483,8 +517,8 @@ cuda_hardware_context::get_property(device_uint_list_property prop) const {
 std::string cuda_hardware_context::get_driver_version() const {
   int driver_version = 0;
 
-  auto err = cudaDriverGetVersion(&driver_version);
-  if (err != cudaSuccess) {
+  auto err = cuda_driver::cuDriverGetVersion(&driver_version);
+  if (err != CUDA_SUCCESS) {
     register_error(
         __acpp_here(),
         error_info{"cuda_hardware_manager: Querying driver version failed",
@@ -498,7 +532,11 @@ std::string cuda_hardware_context::get_profile() const {
   return "FULL_PROFILE";
 }
 
-cuda_hardware_context::~cuda_hardware_context(){}
+cuda_hardware_context::~cuda_hardware_context() {
+  // Destroy CUDA resources before releasing this device's primary context.
+  _event_pool.reset();
+  _allocator.reset();
+}
 
 unsigned cuda_hardware_context::get_compute_capability() const {
   return _properties->major * 10 + _properties->minor;

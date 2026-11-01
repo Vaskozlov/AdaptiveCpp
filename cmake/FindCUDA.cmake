@@ -20,7 +20,6 @@ if (CMAKE_VERSION VERSION_LESS 3.17)
       message(STATUS "Found CUDA version ${CUDA_VERSION} in ${CUDA_TOOLKIT_ROOT_DIR}")
 
       set(CUDA_LIBS "")
-      list(APPEND CUDA_LIBS ${CUDA_LIBRARIES})
       list(APPEND CUDA_LIBS ${CUDA_DRIVER_LIBRARY})
    endif()
 else()
@@ -54,7 +53,8 @@ else()
 
       set(CUDA_FOUND TRUE)
       set(CUDA_TOOLKIT_ROOT_DIR ${CUDAToolkit_LIBRARY_ROOT})
-      set(CUDA_LIBS CUDA::cudart CUDA::cuda_driver)
+      set(CUDA_INCLUDE_DIRS ${CUDAToolkit_INCLUDE_DIRS})
+      set(CUDA_LIBS CUDA::cuda_driver)
    endif()
 endif()
 

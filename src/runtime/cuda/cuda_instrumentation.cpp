@@ -8,11 +8,11 @@
  * See file LICENSE in the project root for full license details.
  */
 // SPDX-License-Identifier: BSD-2-Clause
+#include "cuda_driver.hpp"
 #include "hipSYCL/runtime/cuda/cuda_instrumentation.hpp"
 #include "hipSYCL/runtime/error.hpp"
 #include "hipSYCL/runtime/cuda/cuda_event.hpp"
 
-#include <cuda_runtime_api.h>
 
 #include <cassert>
 #include <memory>
@@ -26,16 +26,16 @@ cuda_event_time_delta::operator()(const dag_node_event& t0,
   assert(t0.is_complete());
   assert(t1.is_complete());
 
-  cudaEvent_t t0_evt = cast<const cuda_node_event>(&t0)->get_event();
-  cudaEvent_t t1_evt = cast<const cuda_node_event>(&t1)->get_event();
+  CUevent t0_evt = cast<const cuda_node_event>(&t0)->get_event();
+  CUevent t1_evt = cast<const cuda_node_event>(&t1)->get_event();
   
   float ms = 0.0f;
-  cudaError_t err = cudaEventElapsedTime(&ms, t0_evt, t1_evt);
+  CUresult err = cuda_driver::cuEventElapsedTime(&ms, t0_evt, t1_evt);
 
-  if (err != cudaSuccess) {
+  if (err != CUDA_SUCCESS) {
     register_error(
         __acpp_here(),
-        error_info{"cuda_event_time_delta: cudaEventElapsedTime() failed",
+        error_info{"cuda_event_time_delta: cuda_driver::cuEventElapsedTime() failed",
                    error_code{"CUDA", err}});
   }
 

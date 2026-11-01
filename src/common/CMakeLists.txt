@@ -54,6 +54,6 @@ endif()
 install(TARGETS acpp-common
         EXPORT install_exports
         INCLUDES DESTINATION include/AdaptiveCpp
-        RUNTIME DESTINATION bin
-        LIBRARY DESTINATION lib
-        ARCHIVE DESTINATION lib)
+        RUNTIME DESTINATION bin COMPONENT Runtime
+        LIBRARY DESTINATION lib COMPONENT Runtime
+        ARCHIVE DESTINATION lib COMPONENT Development)

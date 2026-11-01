@@ -8,7 +8,7 @@
  * See file LICENSE in the project root for full license details.
  */
 // SPDX-License-Identifier: BSD-2-Clause
-#include "driver_types.h"
+#include "cuda_driver.hpp"
 #include "hipSYCL/common/appdb.hpp"
 #include "hipSYCL/common/filesystem.hpp"
 #include "hipSYCL/common/hcf_container.hpp"
@@ -41,9 +41,6 @@
 
 #endif
 
-#include <cuda_runtime_api.h>
-#include <cuda_runtime.h> //for make_cudaPitchedPtr
-#include <cuda.h> // For kernels launched from modules
 
 #include <cassert>
 #include <memory>
@@ -100,13 +97,13 @@ unsigned select_ptx_version(unsigned sm_version, unsigned& ptx_target) {
   return ptx_version;
 }
 
-void host_synchronization_callback(cudaStream_t stream, cudaError_t status,
+void CUDA_CB host_synchronization_callback(CUstream stream, CUresult status,
                                    void *userData) {
   
   assert(userData);
   dag_node_ptr* node = static_cast<dag_node_ptr*>(userData);
   
-  if(status != cudaSuccess) {
+  if(status != CUDA_SUCCESS) {
     register_error(__acpp_here(),
                    error_info{"cuda_queue callback: CUDA returned error code.",
                               error_code{"CUDA", status}});
@@ -182,10 +179,10 @@ result launch_kernel_from_module(CUmodule module,
                                  std::string_view kernel_name,
                                  const rt::range<3> &grid_size,
                                  const rt::range<3> &block_size,
-                                 unsigned shared_memory, cudaStream_t stream,
+                                 unsigned shared_memory, CUstream stream,
                                  void **kernel_args) {
   CUfunction f;
-  CUresult err = cuModuleGetFunction(&f, module, kernel_name.data());
+  CUresult err = cuda_driver::cuModuleGetFunction(&f, module, kernel_name.data());
 
   if (err != CUDA_SUCCESS) {
     return make_error(__acpp_here(),
@@ -193,7 +190,7 @@ result launch_kernel_from_module(CUmodule module,
                                  error_code{"CU", static_cast<int>(err)}});
   }
 
-  err = cuLaunchKernel(f, static_cast<unsigned>(grid_size.get(0)),
+  err = cuda_driver::cuLaunchKernel(f, static_cast<unsigned>(grid_size.get(0)),
                        static_cast<unsigned>(grid_size.get(1)),
                        static_cast<unsigned>(grid_size.get(2)),
                        static_cast<unsigned>(block_size.get(0)),
@@ -235,14 +232,14 @@ cuda_queue::cuda_queue(cuda_backend *be, device_id dev, int priority)
   _reflection_map["ptx_target"] = _ptx_target;
 
 
-  cudaError_t err;
+  CUresult err;
   if(priority == 0) {
-    err = cudaStreamCreateWithFlags(&_stream, cudaStreamNonBlocking);
+    err = cuda_driver::cuStreamCreate(&_stream, CU_STREAM_NON_BLOCKING);
   } else {
     // CUDA API will clamp the priority to the range 
-    err = cudaStreamCreateWithPriority(&_stream, cudaStreamNonBlocking, priority);
+    err = cuda_driver::cuStreamCreateWithPriority(&_stream, CU_STREAM_NON_BLOCKING, priority);
   }
-  if (err != cudaSuccess) {
+  if (err != CUDA_SUCCESS) {
     register_error(__acpp_here(),
                    error_info{"cuda_queue: Couldn't construct backend stream",
                               error_code{"CUDA", err}});
@@ -255,8 +252,9 @@ cuda_queue::cuda_queue(cuda_backend *be, device_id dev, int priority)
 CUstream_st* cuda_queue::get_stream() const { return _stream; }
 
 cuda_queue::~cuda_queue() {
-  auto err = cudaStreamDestroy(_stream);
-  if (err != cudaSuccess) {
+  this->activate_device();
+  auto err = cuda_driver::cuStreamDestroy(_stream);
+  if (err != CUDA_SUCCESS) {
     register_error(__acpp_here(),
                    error_info{"cuda_queue: Couldn't destroy stream",
                               error_code{"CUDA", err}});
@@ -265,7 +263,8 @@ cuda_queue::~cuda_queue() {
 
 /// Inserts an event into the stream
 std::shared_ptr<dag_node_event> cuda_queue::insert_event() {
-  cudaEvent_t evt;
+  this->activate_device();
+  CUevent evt;
   auto event_creation_result =
       _backend->get_event_pool(_dev)->obtain_event(evt);
   if(!event_creation_result.is_success()) {
@@ -273,8 +272,8 @@ std::shared_ptr<dag_node_event> cuda_queue::insert_event() {
     return nullptr;
   }
 
-  cudaError_t err = cudaEventRecord(evt, this->get_stream());
-  if (err != cudaSuccess) {
+  CUresult err = cuda_driver::cuEventRecord(evt, this->get_stream());
+  if (err != CUDA_SUCCESS) {
     register_error(
         __acpp_here(),
         error_info{"cuda_queue: Couldn't record event", error_code{"CUDA", err}});
@@ -286,47 +285,19 @@ std::shared_ptr<dag_node_event> cuda_queue::insert_event() {
 }
 
 std::shared_ptr<dag_node_event> cuda_queue::create_queue_completion_event() {
-  return std::make_shared<queue_completion_event<cudaEvent_t, cuda_node_event>>(
+  return std::make_shared<queue_completion_event<CUevent, cuda_node_event>>(
       this);
 }
 
 
 result cuda_queue::submit_memcpy(memcpy_operation & op, const dag_node_ptr& node) {
+  this->activate_device();
 
   device_id source_dev = op.source().get_device();
   device_id dest_dev = op.dest().get_device();
 
   assert(op.source().get_access_ptr());
   assert(op.dest().get_access_ptr());
-
-  cudaMemcpyKind copy_kind = cudaMemcpyHostToDevice;
-
-  if (source_dev.get_full_backend_descriptor().sw_platform == api_platform::cuda) {
-    if (dest_dev.get_full_backend_descriptor().sw_platform ==
-        api_platform::cuda) {
-      assert(source_dev.get_full_backend_descriptor().hw_platform ==
-                 dest_dev.get_full_backend_descriptor().hw_platform &&
-             "Attempted to execute explicit device<->device copy operation "
-             "between devices from different CUDA hardware backends");
-      copy_kind = cudaMemcpyDeviceToDevice;
-    } else if (dest_dev.get_full_backend_descriptor().hw_platform ==
-               hardware_platform::cpu) {
-      copy_kind = cudaMemcpyDeviceToHost;
-    } else
-      assert(false && "Unknown copy destination platform");
-  } else if (source_dev.get_full_backend_descriptor().hw_platform ==
-             hardware_platform::cpu) {
-    if (dest_dev.get_full_backend_descriptor().sw_platform ==
-        api_platform::cuda) {
-      copy_kind = cudaMemcpyHostToDevice;
-    } else if (dest_dev.get_full_backend_descriptor().hw_platform ==
-        hardware_platform::cpu) {
-      copy_kind = cudaMemcpyHostToHost;
-    } else
-      assert(false && "Unknown copy destination platform");
-  } else
-    assert(false && "Unknown copy source platform");
-
 
   range<3> transfer_range = op.get_num_transferred_elements();
 
@@ -352,48 +323,31 @@ result cuda_queue::submit_memcpy(memcpy_operation & op, const dag_node_ptr& node
 
   cuda_instrumentation_guard instrumentation{this, op, node.get()};
 
-  cudaError_t err = cudaSuccess;
-  if (dimension == 1) {
-    err = cudaMemcpyAsync(
-        op.dest().get_access_ptr(), op.source().get_access_ptr(),
-        op.get_num_transferred_bytes(), copy_kind, get_stream());
-    
-  } else if (dimension == 2) {
-    err = cudaMemcpy2DAsync(
-        op.dest().get_access_ptr(),
-        extract_from_range3<2>(op.dest().get_allocation_shape())[1] *
-            op.dest().get_element_size(),
-        op.source().get_access_ptr(),
-        extract_from_range3<2>(op.source().get_allocation_shape())[1] *
-            op.source().get_element_size(),
-        extract_from_range3<2>(op.get_num_transferred_elements())[1] *
-            op.source().get_element_size(),
-        extract_from_range3<2>(op.get_num_transferred_elements())[0], copy_kind,
-        get_stream());
-    
+  CUresult err = CUDA_SUCCESS;
+  if(dimension == 1) {
+    err = cuda_driver::cuMemcpyAsync(
+        reinterpret_cast<CUdeviceptr>(op.dest().get_access_ptr()),
+        reinterpret_cast<CUdeviceptr>(op.source().get_access_ptr()),
+        op.get_num_transferred_bytes(), get_stream());
   } else {
-    
-    cudaMemcpy3DParms params {};
-    params.srcPtr = make_cudaPitchedPtr(op.source().get_access_ptr(),
-                                        op.source().get_allocation_shape()[2] *
-                                            op.source().get_element_size(),
-                                        op.source().get_allocation_shape()[2],
-                                        op.source().get_allocation_shape()[1]);
-    params.dstPtr = make_cudaPitchedPtr(op.dest().get_access_ptr(),
-                                        op.dest().get_allocation_shape()[2] *
-                                            op.dest().get_element_size(),
-                                        op.dest().get_allocation_shape()[2],
-                                        op.dest().get_allocation_shape()[1]);
-    params.extent = {op.get_num_transferred_elements()[2] *
-                        op.source().get_element_size(),
-                    op.get_num_transferred_elements()[1],
-                    op.get_num_transferred_elements()[0]};
-    params.kind = copy_kind;
-
-    err = cudaMemcpy3DAsync(&params, get_stream());
+    CUDA_MEMCPY3D params{};
+    params.srcMemoryType = source_dev.is_host() ? CU_MEMORYTYPE_HOST : CU_MEMORYTYPE_DEVICE;
+    params.dstMemoryType = dest_dev.is_host() ? CU_MEMORYTYPE_HOST : CU_MEMORYTYPE_DEVICE;
+    params.srcHost = op.source().get_access_ptr();
+    params.dstHost = op.dest().get_access_ptr();
+    params.srcDevice = reinterpret_cast<CUdeviceptr>(op.source().get_access_ptr());
+    params.dstDevice = reinterpret_cast<CUdeviceptr>(op.dest().get_access_ptr());
+    params.srcPitch = op.source().get_allocation_shape()[2] * op.source().get_element_size();
+    params.dstPitch = op.dest().get_allocation_shape()[2] * op.dest().get_element_size();
+    params.srcHeight = op.source().get_allocation_shape()[1];
+    params.dstHeight = op.dest().get_allocation_shape()[1];
+    params.WidthInBytes = transfer_range[2] * op.source().get_element_size();
+    params.Height = transfer_range[1];
+    params.Depth = transfer_range[0];
+    err = cuda_driver::cuMemcpy3DAsync(&params, get_stream());
   }
 
-  if (err != cudaSuccess) {
+  if (err != CUDA_SUCCESS) {
     return make_error(__acpp_here(),
                       error_info{"cuda_queue: Couldn't submit memcpy",
                                   error_code{"CUDA", err}});
@@ -415,31 +369,26 @@ result cuda_queue::submit_kernel(kernel_operation &op, const dag_node_ptr& node)
 }
 
 result cuda_queue::submit_prefetch(prefetch_operation& op, const dag_node_ptr& node) {
+  this->activate_device();
   cuda_instrumentation_guard instrumentation{this, op, node.get()};
 #ifndef _WIN32
-  cudaError_t err = cudaSuccess;
+  CUresult err = CUDA_SUCCESS;
 
-  #if CUDART_VERSION >= 13000
-  cudaMemLocation location;
-  if (op.get_target().is_host()) {
-    location.id = 0; // ignored
-    location.type = cudaMemLocationTypeHostNumaCurrent;
-  } else {
-    location.id = _dev.get_id();
-    location.type = cudaMemLocationTypeDevice;
-  }
-  const unsigned int flags = 0;
-  err = cudaMemPrefetchAsync(op.get_pointer(), op.get_num_bytes(),
-                                    location, flags, get_stream());
-  #else
-  int location = op.get_target().is_host() ? cudaCpuDeviceId : _dev.get_id();
-  err = cudaMemPrefetchAsync(op.get_pointer(), op.get_num_bytes(),
-                                           location, get_stream());
-  #endif
+#if CUDA_VERSION >= 13000
+  CUmemLocation location{};
+  location.id = op.get_target().is_host() ? 0 : op.get_target().get_id();
+  location.type = op.get_target().is_host() ? CU_MEM_LOCATION_TYPE_HOST : CU_MEM_LOCATION_TYPE_DEVICE;
+  err = cuda_driver::cuMemPrefetchAsync(reinterpret_cast<CUdeviceptr>(op.get_pointer()),
+      op.get_num_bytes(), location, 0, get_stream());
+#else
+  int location = op.get_target().is_host() ? CU_DEVICE_CPU : op.get_target().get_id();
+  err = cuda_driver::cuMemPrefetchAsync(reinterpret_cast<CUdeviceptr>(op.get_pointer()),
+      op.get_num_bytes(), location, get_stream());
+#endif
 
-  if (err != cudaSuccess) {
+  if (err != CUDA_SUCCESS) {
     return make_error(__acpp_here(),
-                      error_info{"cuda_queue: cudaMemPrefetchAsync() failed",
+                      error_info{"cuda_queue: cuMemPrefetchAsync() failed",
                                  error_code{"CUDA", err}});
   }
 #else
@@ -450,16 +399,17 @@ result cuda_queue::submit_prefetch(prefetch_operation& op, const dag_node_ptr& n
 }
 
 result cuda_queue::submit_memset(memset_operation &op, const dag_node_ptr& node) {
+  this->activate_device();
 
   cuda_instrumentation_guard instrumentation{this, op, node.get()};
   
-  cudaError_t err = cudaMemsetAsync(op.get_pointer(), op.get_pattern(),
+  CUresult err = cuda_driver::cuMemsetD8Async(reinterpret_cast<CUdeviceptr>(op.get_pointer()), op.get_pattern(),
                                     op.get_num_bytes(), get_stream());
   
 
-  if (err != cudaSuccess) {
+  if (err != CUDA_SUCCESS) {
     return make_error(__acpp_here(),
-                      error_info{"cuda_queue: cudaMemsetAsync() failed",
+                      error_info{"cuda_queue: cuMemsetD8Async() failed",
                                  error_code{"CUDA", err}});
   }
 
@@ -469,16 +419,17 @@ result cuda_queue::submit_memset(memset_operation &op, const dag_node_ptr& node)
 /// Causes the queue to wait until an event on another queue has occured.
 /// the other queue must be from the same backend
 result cuda_queue::submit_queue_wait_for(const dag_node_ptr& node) {
+  this->activate_device();
   auto evt = node->get_event();
-  assert(dynamic_is<inorder_queue_event<cudaEvent_t>>(evt.get()));
+  assert(dynamic_is<inorder_queue_event<CUevent>>(evt.get()));
 
-  inorder_queue_event<cudaEvent_t> *cuda_evt =
-      cast<inorder_queue_event<cudaEvent_t>>(evt.get());
+  inorder_queue_event<CUevent> *cuda_evt =
+      cast<inorder_queue_event<CUevent>>(evt.get());
   
-  auto err = cudaStreamWaitEvent(_stream, cuda_evt->request_backend_event(), 0);
-  if (err != cudaSuccess) {
+  auto err = cuda_driver::cuStreamWaitEvent(_stream, cuda_evt->request_backend_event(), 0);
+  if (err != CUDA_SUCCESS) {
     return make_error(__acpp_here(),
-                      error_info{"cuda_queue: cudaStreamWaitEvent() failed",
+                      error_info{"cuda_queue: cuda_driver::cuStreamWaitEvent() failed",
                                  error_code{"CUDA", err}});
   }
 
@@ -486,16 +437,18 @@ result cuda_queue::submit_queue_wait_for(const dag_node_ptr& node) {
 }
 
 result cuda_queue::submit_external_wait_for(const dag_node_ptr& node) {
+  this->activate_device();
 
   dag_node_ptr* user_data = new dag_node_ptr;
   assert(user_data);
   *user_data = node;
 
   auto err = 
-      cudaStreamAddCallback(_stream, host_synchronization_callback,
+      cuda_driver::cuStreamAddCallback(_stream, host_synchronization_callback,
                            reinterpret_cast<void *>(user_data), 0);
 
-  if (err != cudaSuccess) {
+  if (err != CUDA_SUCCESS) {
+    delete user_data;
     return make_error(__acpp_here(),
                       error_info{"cuda_queue: Couldn't submit stream callback",
                                  error_code{"CUDA", err}});
@@ -505,10 +458,11 @@ result cuda_queue::submit_external_wait_for(const dag_node_ptr& node) {
 }
 
 result cuda_queue::wait() {
+  this->activate_device();
 
-  auto err = cudaStreamSynchronize(_stream);
+  auto err = cuda_driver::cuStreamSynchronize(_stream);
 
-  if(err != cudaSuccess) {
+  if(err != CUDA_SUCCESS) {
     return make_error(__acpp_here(),
                       error_info{"cuda_queue: Couldn't synchronize with stream",
                                  error_code{"CUDA", err}});
@@ -790,10 +744,11 @@ cuda_multipass_code_object_invoker::cuda_multipass_code_object_invoker(
     : _queue{q} {}
 
 result cuda_queue::query_status(inorder_queue_status &status) {
-  auto err = cudaStreamQuery(_stream);
-  if(err == cudaSuccess) {
+  this->activate_device();
+  auto err = cuda_driver::cuStreamQuery(_stream);
+  if(err == CUDA_SUCCESS) {
     status = inorder_queue_status{true};
-  } else if(err == cudaErrorNotReady) {
+  } else if(err == CUDA_ERROR_NOT_READY) {
     status = inorder_queue_status{false};
   } else {
     return make_error(__acpp_here(),

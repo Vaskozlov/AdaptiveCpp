@@ -30,6 +30,9 @@
 #include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/Program.h>
+#ifdef ACPP_EMBED_CUDA_LIBDEVICE
+#include "embedded_libdevice.hpp"
+#endif
 #include <memory>
 #include <cassert>
 #include <string>
@@ -44,6 +47,7 @@ namespace {
 
 
 
+#ifndef ACPP_EMBED_CUDA_LIBDEVICE
 std::string getDeviceLibPath() {
   static std::string Path;
   if(!Path.empty()) {
@@ -63,6 +67,7 @@ std::string getDeviceLibPath() {
   return Path;
 }
 
+#endif
 
 void setNVVMReflectParameter(llvm::Module& M, llvm::StringRef Name, int Value) {
   llvm::SmallVector<llvm::Metadata*, 4> Metadata;
@@ -149,8 +154,7 @@ bool LLVMToPtxTranslator::toBackendFlavor(llvm::Module &M, PassHandler& PH) {
   std::string BuiltinBitcodeFile =
       common::filesystem::join_path(getBitcodePath(), "libkernel-sscp-ptx-full.bc");
 
-  std::string LibdeviceFile = getDeviceLibPath();
-  HIPSYCL_DEBUG_INFO << "LLVMToPtx: Using libdevice at " << LibdeviceFile << "\n";
+
 
   AddressSpaceInferencePass ASIPass {ASMap};
   ASIPass.run(M, *PH.ModuleAnalysisManager);
@@ -162,8 +166,15 @@ bool LLVMToPtxTranslator::toBackendFlavor(llvm::Module &M, PassHandler& PH) {
 
   if(!this->linkBitcodeFile(M, BuiltinBitcodeFile))
     return false;
-  if(!this->linkBitcodeFile(M, LibdeviceFile, Triple, DataLayout))
+#ifdef ACPP_EMBED_CUDA_LIBDEVICE
+  if(!this->linkBitcodeString(M, std::string{
+          reinterpret_cast<const char *>(acpp_embedded_libdevice),
+          sizeof(acpp_embedded_libdevice)}, Triple, DataLayout))
     return false;
+#else
+  if(!this->linkBitcodeFile(M, getDeviceLibPath(), Triple, DataLayout))
+    return false;
+#endif
 
   return true;
 }

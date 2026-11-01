@@ -16,11 +16,11 @@
 
 #include "../hardware.hpp"
 
-struct cudaDeviceProp;
 
 namespace hipsycl {
 namespace rt {
 
+struct cuda_device_properties;
 class cuda_allocator;
 class cuda_event_pool;
 
@@ -62,7 +62,8 @@ public:
   unsigned get_compute_capability() const;
 
 private:
-  std::unique_ptr<cudaDeviceProp> _properties;
+  friend class cuda_hardware_manager;
+  std::unique_ptr<cuda_device_properties> _properties;
   std::unique_ptr<cuda_allocator> _allocator;
   std::unique_ptr<cuda_event_pool> _event_pool;
   int _dev;

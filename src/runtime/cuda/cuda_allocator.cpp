@@ -8,7 +8,7 @@
  * See file LICENSE in the project root for full license details.
  */
 // SPDX-License-Identifier: BSD-2-Clause
-#include <cuda_runtime_api.h>
+#include "cuda_driver.hpp"
 
 #include "hipSYCL/runtime/cuda/cuda_allocator.hpp"
 #include "hipSYCL/runtime/cuda/cuda_device_manager.hpp"
@@ -25,19 +25,19 @@ cuda_allocator::cuda_allocator(backend_descriptor desc, int cuda_device)
 void *cuda_allocator::raw_allocate(size_t min_alignment, size_t size_bytes,
                                    const allocation_hints &hints)
 {
-  void *ptr;
+  CUdeviceptr ptr = 0;
   cuda_device_manager::get().activate_device(_dev);
-  cudaError_t err = cudaMalloc(&ptr, size_bytes);
+  CUresult err = cuda_driver::cuMemAlloc(&ptr, size_bytes);
 
-  if (err != cudaSuccess) {
+  if (err != CUDA_SUCCESS) {
     register_error(__acpp_here(),
-                   error_info{"cuda_allocator: cudaMalloc() failed",
+                   error_info{"cuda_allocator: cuMemAlloc() failed",
                               error_code{"CUDA", err},
                               error_type::memory_allocation_error});
     return nullptr;
   }
 
-  return ptr;
+  return reinterpret_cast<void *>(ptr);
 }
 
 void *
@@ -47,11 +47,11 @@ cuda_allocator::raw_allocate_optimized_host(size_t min_alignment,
   void *ptr;
   cuda_device_manager::get().activate_device(_dev);
 
-  cudaError_t err = cudaMallocHost(&ptr, bytes);
+  CUresult err = cuda_driver::cuMemAllocHost(&ptr, bytes);
 
-  if (err != cudaSuccess) {
+  if (err != CUDA_SUCCESS) {
     register_error(__acpp_here(),
-                   error_info{"cuda_allocator: cudaMallocHost() failed",
+                   error_info{"cuda_allocator: cuMemAllocHost() failed",
                               error_code{"CUDA", err},
                               error_type::memory_allocation_error});
     return nullptr;
@@ -60,6 +60,9 @@ cuda_allocator::raw_allocate_optimized_host(size_t min_alignment,
 }
 
 void cuda_allocator::raw_free(void *mem) {
+  if(!mem)
+    return;
+  cuda_device_manager::get().activate_device(_dev);
 
   pointer_info info;
   result query_result = query_pointer(mem, info);
@@ -69,15 +72,15 @@ void cuda_allocator::raw_free(void *mem) {
     return;
   }
   
-  cudaError_t err;
+  CUresult err;
   if (info.is_optimized_host)
-    err = cudaFreeHost(mem);
+    err = cuda_driver::cuMemFreeHost(mem);
   else
-    err = cudaFree(mem);
+    err = cuda_driver::cuMemFree(reinterpret_cast<CUdeviceptr>(mem));
   
-  if (err != cudaSuccess) {
+  if (err != CUDA_SUCCESS) {
     register_error(__acpp_here(),
-                   error_info{"cuda_allocator: cudaFree() failed",
+                   error_info{"cuda_allocator: cuMemFree() failed",
                               error_code{"CUDA", err},
                               error_type::memory_allocation_error});
   }
@@ -88,17 +91,17 @@ void * cuda_allocator::raw_allocate_usm(size_t bytes,
 {
   cuda_device_manager::get().activate_device(_dev);
   
-  void *ptr;
-  auto err = cudaMallocManaged(&ptr, bytes);
-  if (err != cudaSuccess) {
+  CUdeviceptr ptr = 0;
+  auto err = cuda_driver::cuMemAllocManaged(&ptr, bytes, CU_MEM_ATTACH_GLOBAL);
+  if (err != CUDA_SUCCESS) {
     register_error(__acpp_here(),
-                   error_info{"cuda_allocator: cudaMallocManaged() failed",
+                   error_info{"cuda_allocator: cuMemAllocManaged() failed",
                               error_code{"CUDA", err},
                               error_type::memory_allocation_error});
     return nullptr;
   }
 
-  return ptr;
+  return reinterpret_cast<void *>(ptr);
 }
 
 bool cuda_allocator::is_usm_accessible_from(backend_descriptor b) const
@@ -109,37 +112,26 @@ bool cuda_allocator::is_usm_accessible_from(backend_descriptor b) const
 }
 
 result cuda_allocator::query_pointer(const void *ptr, pointer_info &out) const {
-  cudaPointerAttributes attribs;
-  auto err = cudaPointerGetAttributes(&attribs, ptr);
-
-  if (err != cudaSuccess) {
-    if (err == cudaErrorInvalidValue)
-      return make_error(
-          __acpp_here(),
-          error_info{"cuda_allocator: query_pointer(): pointer is unknown by backend",
-                     error_code{"CUDA", err},
-                     error_type::invalid_parameter_error});
-    else
-      return make_error(
-          __acpp_here(),
-          error_info{"cuda_allocator: query_pointer(): query failed",
-                     error_code{"CUDA", err}});
+  cuda_device_manager::get().activate_device(_dev);
+  unsigned int memory_type = 0;
+  unsigned int is_managed = 0;
+  int device = -1;
+  CUpointer_attribute attributes[] = {CU_POINTER_ATTRIBUTE_MEMORY_TYPE,
+      CU_POINTER_ATTRIBUTE_IS_MANAGED, CU_POINTER_ATTRIBUTE_DEVICE_ORDINAL};
+  void *values[] = {&memory_type, &is_managed, &device};
+  auto err = cuda_driver::cuPointerGetAttributes(3, attributes, values,
+      reinterpret_cast<CUdeviceptr>(ptr));
+  // cuPointerGetAttributes succeeds with zeroed attributes for unknown pointers.
+  if(err != CUDA_SUCCESS || memory_type == 0) {
+    return make_error(__acpp_here(), error_info{
+        "cuda_allocator: query_pointer(): pointer is unknown by backend",
+        error_code{"CUDA", err}, error_type::invalid_parameter_error});
   }
 
-  // CUDA 11+ return cudaMemoryTypeUnregistered and cudaSuccess
-  // for unknown host pointers
-  if (attribs.type == cudaMemoryTypeUnregistered) {
-    return make_error(
-          __acpp_here(),
-          error_info{"cuda_allocator: query_pointer(): pointer is unknown by backend",
-                     error_code{"CUDA", err},
-                     error_type::invalid_parameter_error});
-  }
-
-  out.dev = rt::device_id{_backend_descriptor, attribs.device};
+  out.dev = rt::device_id{_backend_descriptor, device};
   out.is_from_host_backend = false;
-  out.is_optimized_host = attribs.type == cudaMemoryTypeHost;
-  out.is_usm = attribs.type == cudaMemoryTypeManaged;
+  out.is_optimized_host = memory_type == CU_MEMORYTYPE_HOST;
+  out.is_usm = is_managed != 0;
   out.native_handle = nullptr;
   out.native_offset = 0;
   
@@ -149,19 +141,20 @@ result cuda_allocator::query_pointer(const void *ptr, pointer_info &out) const {
 result cuda_allocator::mem_advise(const void *addr, std::size_t num_bytes,
                             int advise) const {
 #ifndef _WIN32
-  #if CUDART_VERSION >= 13000
-  cudaMemLocation location;
+  cuda_device_manager::get().activate_device(_dev);
+#if CUDA_VERSION >= 13000
+  CUmemLocation location{};
   location.id = _dev;
-  location.type = cudaMemLocationTypeDevice;
-  #else
+  location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+#else
   int location = _dev;
-  #endif
-  cudaError_t err = cudaMemAdvise(addr, num_bytes,
-                                  static_cast<cudaMemoryAdvise>(advise), location);
-  if(err != cudaSuccess) {
+#endif
+  CUresult err = cuda_driver::cuMemAdvise(reinterpret_cast<CUdeviceptr>(addr),
+      num_bytes, static_cast<CUmem_advise>(advise), location);
+  if(err != CUDA_SUCCESS) {
     return make_error(
       __acpp_here(),
-      error_info{"cuda_allocator: cudaMemAdvise() failed", error_code{"CUDA", err}}
+      error_info{"cuda_allocator: cuMemAdvise() failed", error_code{"CUDA", err}}
     );
   }
 #else

@@ -70,8 +70,8 @@ function(create_llvm_based_library)
 
   set(install_subdir hipSYCL/llvm-to-backend)
   install(TARGETS ${target}
-    RUNTIME DESTINATION bin/${install_subdir}
-    LIBRARY DESTINATION lib/${install_subdir}
+    RUNTIME DESTINATION bin/${install_subdir} COMPONENT Runtime
+    LIBRARY DESTINATION lib/${install_subdir} COMPONENT Runtime
     ARCHIVE DESTINATION lib/${install_subdir})
 endfunction()
 
@@ -239,9 +239,22 @@ if(WITH_SSCP_COMPILER)
       LIBRARY ptx/LLVMToPtx.cpp
       TOOL ptx/LLVMToPtxTool.cpp)
 
-    target_compile_definitions(llvm-to-ptx PRIVATE
-      -DHIPSYCL_CUDA_PATH="${CUDA_TOOLKIT_ROOT_DIR}"
-      -DACPP_CUDA_DEVICE_LIBS_PATH="${CUDA_DEVICE_LIBS_PATH}")
+    if(ACPP_EMBED_CUDA_LIBDEVICE)
+      set(embedded_libdevice "${CMAKE_CURRENT_BINARY_DIR}/embedded_libdevice.hpp")
+      add_custom_command(OUTPUT "${embedded_libdevice}"
+        COMMAND "${CMAKE_COMMAND}"
+          "-DINPUT=${ACPP_CUDA_LIBDEVICE}"
+          "-DOUTPUT=${embedded_libdevice}"
+          -P "${ACPP_SOURCE_ROOT}/cmake/EmbedBinary.cmake"
+        DEPENDS "${ACPP_CUDA_LIBDEVICE}" "${ACPP_SOURCE_ROOT}/cmake/EmbedBinary.cmake"
+        VERBATIM)
+      target_sources(llvm-to-ptx PRIVATE "${embedded_libdevice}")
+      target_include_directories(llvm-to-ptx PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+      target_compile_definitions(llvm-to-ptx PRIVATE ACPP_EMBED_CUDA_LIBDEVICE)
+    else()
+      target_compile_definitions(llvm-to-ptx PRIVATE
+        -DACPP_CUDA_DEVICE_LIBS_PATH="${CUDA_DEVICE_LIBS_PATH}")
+    endif()
   endif()
 
   if(WITH_LLVM_TO_AMDGPU_AMDHSA)

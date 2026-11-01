@@ -119,7 +119,7 @@ function(libkernel_generate_bitcode_target)
     DEPENDS ${output_files} ${target_depends}
   )
 
-  install(FILES ${linked_output} DESTINATION lib/hipSYCL/bitcode)
+  install(FILES ${linked_output} DESTINATION lib/hipSYCL/bitcode COMPONENT Runtime)
 
   add_custom_target(libkernel-sscp-${target} ALL
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
