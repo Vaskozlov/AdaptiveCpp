@@ -15,6 +15,10 @@ target_include_directories(cuda-driver-tests PRIVATE
   "${ACPP_SOURCE_ROOT}/include" "${ACPP_BINARY_ROOT}/include"
   "${ACPP_SOURCE_ROOT}/src/runtime/cuda" ${CUDA_INCLUDE_DIRS})
 target_link_libraries(cuda-driver-tests PRIVATE acpp-rt Threads::Threads)
+if(WITH_SSCP_COMPILER)
+  target_compile_definitions(cuda-driver-tests PRIVATE HIPSYCL_WITH_SSCP_COMPILER)
+  target_link_libraries(cuda-driver-tests PRIVATE llvm-to-ptx)
+endif()
 add_test(NAME cuda-driver-backend COMMAND cuda-driver-tests)
 add_test(NAME cuda-driver-unavailable COMMAND cuda-driver-tests no-driver)
 add_test(NAME cuda-driver-missing-symbol COMMAND cuda-driver-tests missing-symbol)

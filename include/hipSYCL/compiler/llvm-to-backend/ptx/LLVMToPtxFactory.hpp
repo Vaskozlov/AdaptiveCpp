@@ -22,6 +22,15 @@ namespace compiler {
 std::unique_ptr<LLVMToBackendTranslator>
 createLLVMToPtxTranslator(const std::vector<std::string> &KernelNames);
 
+struct PtxTarget {
+  unsigned architecture;
+  unsigned version;
+};
+
+// Keep native targets when supported, otherwise use forward-compatible PTX
+// supported by the selected LLVM toolchain. This never selects an 'a' target.
+PtxTarget selectLLVMToPtxTarget(unsigned architecture, unsigned version);
+
 }
 }
 

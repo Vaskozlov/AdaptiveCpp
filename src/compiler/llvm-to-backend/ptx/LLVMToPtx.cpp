@@ -9,6 +9,7 @@
  */
 // SPDX-License-Identifier: BSD-2-Clause
 #include "hipSYCL/compiler/llvm-to-backend/ptx/LLVMToPtx.hpp"
+#include "hipSYCL/compiler/llvm-to-backend/ptx/LLVMToPtxFactory.hpp"
 #include "hipSYCL/compiler/llvm-to-backend/AddressSpaceMap.hpp"
 #include "hipSYCL/compiler/llvm-to-backend/Utils.hpp"
 #include "hipSYCL/compiler/llvm-to-backend/AddressSpaceInferencePass.hpp"
@@ -39,12 +40,74 @@
 #include <system_error>
 #include <vector>
 #include <array>
+#include <algorithm>
+#include <sstream>
 
 namespace hipsycl {
 namespace compiler {
 
 namespace {
 
+struct SupportedPtxTargets {
+  std::vector<unsigned> architectures;
+  std::vector<unsigned> versions;
+};
+
+SupportedPtxTargets querySupportedPtxTargets() {
+  SupportedPtxTargets Targets;
+  llvm::SmallVector<char> OutputFile, ErrorFile;
+  AtScopeExit Cleanup([&]() {
+    if(!OutputFile.empty()) llvm::sys::fs::remove(OutputFile.data());
+    if(!ErrorFile.empty()) llvm::sys::fs::remove(ErrorFile.data());
+  });
+  if(llvm::sys::fs::createTemporaryFile("acpp-ptx-targets", "txt", OutputFile) ||
+     llvm::sys::fs::createTemporaryFile("acpp-ptx-targets", "txt", ErrorFile))
+    return Targets;
+
+#if LLVM_VERSION_MAJOR < 16
+  using OptionalStringRef = llvm::Optional<llvm::StringRef>;
+#else
+  using OptionalStringRef = std::optional<llvm::StringRef>;
+#endif
+  std::array<OptionalStringRef, 3> Redirects{
+      OptionalStringRef{}, llvm::StringRef{OutputFile.data()},
+      llvm::StringRef{ErrorFile.data()}};
+  const auto LLC = getLLCPath();
+  if(executeAndWait(LLC, {LLC, "-march=nvptx64", "-mcpu=help"}, {}, Redirects) != 0)
+    return Targets;
+
+  auto Parse = [&](const char *Path) {
+    auto Buffer = llvm::MemoryBuffer::getFile(Path);
+    if(!Buffer) return;
+    std::istringstream Lines{Buffer.get()->getBuffer().str()};
+    std::string Line, Key;
+    while(std::getline(Lines, Line)) {
+      std::istringstream Fields{Line};
+      if(!(Fields >> Key)) continue;
+      std::vector<unsigned> *Values = nullptr;
+      std::size_t Prefix = 0;
+      if(Key.compare(0, 3, "sm_") == 0) {
+        Values = &Targets.architectures;
+        Prefix = 3;
+      } else if(Key.compare(0, 3, "ptx") == 0) {
+        Values = &Targets.versions;
+        Prefix = 3;
+      }
+      if(!Values || Key.size() <= Prefix) continue;
+      unsigned Value = 0;
+      bool Valid = true;
+      for(std::size_t I = Prefix; I < Key.size(); ++I) {
+        if(Key[I] < '0' || Key[I] > '9') { Valid = false; break; }
+        Value = Value * 10 + (Key[I] - '0');
+      }
+      // Architecture-specific targets such as sm_90a are not forward compatible.
+      if(Valid) Values->push_back(Value);
+    }
+  };
+  Parse(OutputFile.data());
+  Parse(ErrorFile.data());
+  return Targets;
+}
 
 
 #ifndef ACPP_EMBED_CUDA_LIBDEVICE
@@ -92,6 +155,20 @@ void setPrecSqrt(llvm::Module& M, int Mode) {
   setNVVMReflectParameter(M, "prec-sqrt", Mode);
 }
 
+}
+
+PtxTarget selectLLVMToPtxTarget(unsigned Architecture, unsigned Version) {
+  // Query the same local llc used for JIT compilation once per process. This
+  // works with older LLVM releases and vendor builds without a version table.
+  static const SupportedPtxTargets Supported = querySupportedPtxTargets();
+  auto Select = [](const std::vector<unsigned> &Values, unsigned Requested) {
+    unsigned Best = 0;
+    for(unsigned Value : Values)
+      if(Value <= Requested) Best = std::max(Best, Value);
+    return Best ? Best : Requested;
+  };
+  return {Select(Supported.architectures, Architecture),
+          Select(Supported.versions, Version)};
 }
 
 LLVMToPtxTranslator::LLVMToPtxTranslator(const std::vector<std::string> &KN)

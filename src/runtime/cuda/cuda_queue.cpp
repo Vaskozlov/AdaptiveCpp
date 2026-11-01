@@ -226,6 +226,17 @@ cuda_queue::cuda_queue(cuda_backend *be, device_id dev, int priority)
   this->_ptx_target = 0;
   this->_ptx_version =
       select_ptx_version(ctx->get_compute_capability(), _ptx_target);
+#ifdef HIPSYCL_WITH_SSCP_COMPILER
+  auto target = compiler::selectLLVMToPtxTarget(_ptx_target, _ptx_version);
+  if(target.architecture != _ptx_target || target.version != _ptx_version) {
+    HIPSYCL_DEBUG_INFO << "cuda_queue: Using forward-compatible PTX target sm_"
+                      << target.architecture << " / PTX " << target.version
+                      << " for device sm_" << ctx->get_compute_capability()
+                      << std::endl;
+  }
+  _ptx_target = target.architecture;
+  _ptx_version = target.version;
+#endif
 
   _reflection_map = glue::jit::construct_default_reflection_map(ctx);
   _reflection_map["ptx_version"] = _ptx_version;

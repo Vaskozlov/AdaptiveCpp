@@ -78,6 +78,40 @@ They also test absent drivers, missing symbols, and PTX generation using a
 libdevice math function through the embedded library. They do not replace testing
 kernel execution on an NVIDIA GPU.
 
+## LLVM 15 and newer GPU architectures
+
+LLVM/Clang 15.0.6 has also been built and tested on Debian 12 arm64 with this
+configuration. Use the matching LLVM 15 development packages and a fresh build
+directory, with these substitutions in the example above:
+
+```sh
+-DCMAKE_C_COMPILER=clang-15 \
+-DCMAKE_CXX_COMPILER=clang++-15 \
+-DLLVM_DIR=/usr/lib/llvm-15/lib/cmake/llvm
+```
+
+At startup, the PTX translator queries the selected local `llc` once for its
+supported SM targets and PTX versions. A GPU newer than that compiler uses the
+highest compatible target the compiler supports. This query runs a local
+program and performs no downloads. Architecture-specific targets such as
+`sm_90a` are excluded from the fallback.
+
+The embedded-libdevice test verifies these PTX generation requests with LLVM 15:
+
+| GPU target request | Selected LLVM 15 target |
+| --- | --- |
+| Turing `sm_75`, PTX 6.3 | `sm_75`, PTX 6.3 |
+| Ampere `sm_86`, PTX 7.1 | `sm_86`, PTX 7.1 |
+| Ada `sm_89`, PTX 7.8 | `sm_86`, PTX 7.5 |
+| Blackwell `sm_120`, PTX 8.8 | `sm_86`, PTX 7.5 |
+
+For portable SYCL kernels, the NVIDIA driver can JIT older PTX for newer GPUs,
+as described in the
+[NVIDIA Blackwell compatibility guide](https://docs.nvidia.com/cuda/archive/12.8.1/blackwell-compatibility-guide/index.html).
+Blackwell-specific instructions and compiler optimizations require a newer
+LLVM. Actual GPU execution across these generations still needs validation on
+NVIDIA hardware; the tests above verify PTX generation and module contents.
+
 ## Build DEB packages with CPack
 
 Install `dpkg-dev` and `file` on the Linux packaging machine, then run:
@@ -129,8 +163,10 @@ package is not needed to execute an already compiled application.
 
 ## Validation reference
 
-The driver-only configuration has been built with LLVM 19 on Debian 13 arm64
-and macOS arm64. All four GPU-independent tests pass. On Debian, both DEBs
+The driver-only configuration has been built with LLVM 15.0.6 on Debian 12
+arm64, and LLVM 19 on Debian 13 arm64 and macOS arm64. All four GPU-independent
+tests pass, including native and fallback PTX generation for Turing through
+Blackwell requests with LLVM 15 and LLVM 19. On Debian, both DEBs
 were installed, generic and OpenMP applications were compiled, and those
 applications and a libdevice-dependent PTX translation ran successfully after
 the development package was removed and the original LLVM tool directory was

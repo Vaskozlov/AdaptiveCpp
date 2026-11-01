@@ -43,10 +43,10 @@ CUresult CUDAAPI name(char *out, int length, CUdevice dev) {
   std::strncpy(out, dev == 0 ? "Mock GPU 0" : "Mock GPU 1", length);
   return CUDA_SUCCESS;
 }
-CUresult CUDAAPI attribute(int *out, CUdevice_attribute attr, CUdevice) {
+CUresult CUDAAPI attribute(int *out, CUdevice_attribute attr, CUdevice dev) {
   *out = 1;
-  if(attr == CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR) *out = 8;
-  if(attr == CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR) *out = 0;
+  if(attr == CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR) *out = dev == 0 ? 7 : 12;
+  if(attr == CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR) *out = dev == 0 ? 5 : 0;
   if(attr == CU_DEVICE_ATTRIBUTE_WARP_SIZE) *out = 32;
   if(attr == CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK) *out = 1024;
   return CUDA_SUCCESS;
@@ -187,7 +187,7 @@ int main(int argc, char **argv) {
   auto *hardware = backend.get_hardware_manager();
   CHECK(hardware->get_num_devices() == 2);
   CHECK(hardware->get_device(1)->get_device_name() == "Mock GPU 1");
-  CHECK(hardware->get_device(1)->get_device_arch() == "sm_80");
+  CHECK(hardware->get_device(1)->get_device_arch() == "sm_120");
   auto dev = hardware->get_device_id(1);
   auto *allocator = backend.get_allocator(dev);
   void *device = allocator->raw_allocate(64, 128);
