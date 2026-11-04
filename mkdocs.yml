@@ -39,6 +39,8 @@ nav:
   - 'Installation doc' :
       - 'LLVM' : 'install-llvm.md'
       - 'CUDA' : 'install-cuda.md'
+      - 'NVIDIA driver API' : 'install-cuda-driver.md'
+      - 'Conan' : 'install-conan.md'
       - 'ROCM' : 'install-rocm.md'
       - 'OpenCL' : 'install-ocl.md'
       - 'Level Zero' : 'install-spirv.md'

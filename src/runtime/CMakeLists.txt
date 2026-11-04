@@ -296,6 +296,11 @@ if(WITH_VULKAN_BACKEND)
 endif() # WITH_VULKAN_BACKEND
 
 if(WITH_OPENCL_BACKEND)
+  if(NOT ACPP_ALLOW_DOWNLOADS)
+    message(FATAL_ERROR
+      "The OpenCL backend downloads OpenCL headers. Disable WITH_OPENCL_BACKEND "
+      "or explicitly enable ACPP_ALLOW_DOWNLOADS.")
+  endif()
   include(FetchContent)
   FetchContent_Declare(ocl-headers
     GIT_REPOSITORY https://github.com/KhronosGroup/OpenCL-Headers
@@ -467,6 +472,11 @@ if (WITH_METAL_BACKEND)
     PATH_SUFFIXES include
   )
   if(NOT METAL_INCLUDE_DIR)
+    if(NOT ACPP_ALLOW_DOWNLOADS)
+      message(FATAL_ERROR
+        "The Metal backend needs metal-cpp headers. Set METAL_INCLUDE_DIR, "
+        "disable WITH_METAL_BACKEND, or explicitly enable ACPP_ALLOW_DOWNLOADS.")
+    endif()
     message(STATUS "Metal/Metal.hpp not found, fetching metal-cpp")
     include(FetchContent)
     FetchContent_Declare(metal-cpp

@@ -1,6 +1,8 @@
 # CMake out-of-source
 build*/
 *-build-*/
+CMakeUserPresets.json
+__pycache__/
 
 # vscode in-source configs
 .vscode/

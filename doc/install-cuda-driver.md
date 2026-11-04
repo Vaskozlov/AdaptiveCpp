@@ -8,6 +8,13 @@ Use a supported LLVM version as for an ordinary full AdaptiveCpp installation.
 The bundled driver header targets CUDA 11.8. No additional NVIDIA files or
 network downloads are needed to build this configuration.
 
+Driver-only builds default the other GPU backends to OFF and
+`ACPP_ALLOW_DOWNLOADS` to OFF. Explicit selections are preserved, but enabling
+a backend that fetches sources requires explicitly opting into downloads.
+Use a fresh build directory when changing modes to avoid retaining earlier
+backend selections. For Conan builds and distribution, including the same
+CPack DEB workflow, see [Building with Conan](install-conan.md).
+
 On the execution machine, the backend loads the system NVIDIA driver's
 `libcuda.so.1`. An absent driver or an incompatible driver exposes no CUDA
 devices; OpenMP remains available. Driver symbols are resolved with the ABI

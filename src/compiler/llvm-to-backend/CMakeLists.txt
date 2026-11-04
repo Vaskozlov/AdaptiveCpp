@@ -148,8 +148,6 @@ function(add_hipsycl_llvm_backend)
   create_llvm_to_backend_tool(TARGET llvm-to-${backend_name} SOURCES ${tool_sources})
 endfunction()
 
-include(ExternalProject)
-
 if(WITH_SSCP_COMPILER)
   if(WIN32)
     set(MODE STATIC)
@@ -178,6 +176,13 @@ if(WITH_SSCP_COMPILER)
   )
 
   if(WITH_LLVM_TO_SPIRV)
+    if(NOT ACPP_ALLOW_DOWNLOADS)
+      message(FATAL_ERROR
+        "OpenCL and Level Zero support downloads the LLVM-SPIRV translator at build time. "
+        "Disable WITH_OPENCL_BACKEND and WITH_LEVEL_ZERO_BACKEND "
+        "or explicitly enable ACPP_ALLOW_DOWNLOADS.")
+    endif()
+    include(ExternalProject)
     add_hipsycl_llvm_backend(
       BACKEND spirv
       LIBRARY spirv/LLVMToSpirv.cpp

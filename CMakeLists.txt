@@ -16,13 +16,13 @@ set(ACPP_VERSION_MAJOR 25)
 set(ACPP_VERSION_MINOR 10)
 set(ACPP_VERSION_PATCH 0)
 
-execute_process(
-        COMMAND git status
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-        RESULT_VARIABLE GIT_STATUS
-)
+if(NOT DEFINED ACPP_VERSION_SUFFIX)
+  execute_process(
+          COMMAND git status
+          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+          RESULT_VARIABLE GIT_STATUS
+  )
 
-if(NOT ACPP_VERSION_SUFFIX)
   # With a release tarball, "git status" will fail (return non zero)
   if(GIT_STATUS)
     set(ACPP_VERSION_SUFFIX "")
@@ -122,6 +122,18 @@ set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME Development)
 option(ACPP_CUDA_DRIVER_ONLY "Build NVIDIA support without the CUDA toolkit (generic compilation only)" OFF)
 option(ACPP_EMBED_CUDA_LIBDEVICE "Embed libdevice in the PTX JIT library" ${ACPP_CUDA_DRIVER_ONLY})
 
+# Driver-only builds must not acquire unrelated SDKs just because they happen
+# to be installed on the build machine. Explicit backend selections still win.
+if(ACPP_CUDA_DRIVER_ONLY)
+  foreach(backend ROCM OPENCL LEVEL_ZERO VULKAN METAL)
+    set(WITH_${backend}_BACKEND OFF CACHE BOOL "Build the ${backend} backend")
+  endforeach()
+  set(ACPP_DOWNLOADS_DEFAULT OFF)
+else()
+  set(ACPP_DOWNLOADS_DEFAULT ON)
+endif()
+option(ACPP_ALLOW_DOWNLOADS "Allow CMake to download third-party sources" ${ACPP_DOWNLOADS_DEFAULT})
+
 # Check for CUDA/ROCm and clang
 list(INSERT CMAKE_MODULE_PATH 0 "${ACPP_SOURCE_ROOT}/cmake/")
 if(ACPP_CUDA_DRIVER_ONLY)
@@ -149,7 +161,7 @@ if((APPLE OR WIN32) AND ACPP_LLVM_COMPONENT)
   if(WIN32)
     add_definitions(-DWIN32_LEAN_AND_MEAN -DNOMINMAX -D_USE_MATH_DEFINES)
   endif()
-elseif(APPLE OR WIN32)
+elseif((APPLE OR WIN32) AND NOT ACPP_CUDA_DRIVER_ONLY)
   set(DEFAULT_COMPILER_FEATURES_ENABLED false)
   set(ACPP_COMPILER_FEATURE_PROFILE "none" CACHE STRING "The level of AdaptiveCpp compiler features to enable. If not set to 'full', AdaptiveCpp will run in a degraded mode that may have implications for certain functionalities or performance in certain cases.")
 else()
@@ -345,6 +357,33 @@ if(BUILD_CLANG_PLUGIN)
   if(NOT ACPP_LLVM_COMPONENT)
     set(LLVM_DIR_OLD ${LLVM_DIR})
     find_package(LLVM CONFIG)
+    set(ACPP_EXPECTED_LLVM_VERSION "" CACHE STRING "Require an exact LLVM version (for binary package identity)")
+    if(ACPP_EXPECTED_LLVM_VERSION AND
+        NOT LLVM_PACKAGE_VERSION VERSION_EQUAL ACPP_EXPECTED_LLVM_VERSION)
+      message(FATAL_ERROR
+        "Expected LLVM ${ACPP_EXPECTED_LLVM_VERSION}, found ${LLVM_PACKAGE_VERSION} in ${LLVM_DIR}. "
+        "Select the matching LLVM installation or correct the package's llvm_version option.")
+    endif()
+    if(UNIX AND NOT APPLE AND NOT CMAKE_CROSSCOMPILING AND TARGET LLVM)
+      # Debian's LLVM target points through development-package symlinks.
+      # Linking the real library avoids a redundant RPATH and prevents
+      # dpkg-shlibdeps from confusing that symlink's owner with the runtime.
+      get_target_property(llvm_imported LLVM IMPORTED)
+      if(llvm_imported)
+        get_target_property(llvm_import_configs LLVM IMPORTED_CONFIGURATIONS)
+        set(llvm_location_properties IMPORTED_LOCATION)
+        foreach(config IN LISTS llvm_import_configs)
+          list(APPEND llvm_location_properties "IMPORTED_LOCATION_${config}")
+        endforeach()
+        foreach(property IN LISTS llvm_location_properties)
+          get_target_property(llvm_location LLVM "${property}")
+          if(EXISTS "${llvm_location}")
+            get_filename_component(llvm_real_location "${llvm_location}" REALPATH)
+            set_property(TARGET LLVM PROPERTY "${property}" "${llvm_real_location}")
+          endif()
+        endforeach()
+      endif()
+    endif()
     if(LLVM_DIR_OLD AND NOT ("${LLVM_DIR_OLD}" STREQUAL "${LLVM_DIR}"))
       message(WARNING "Could not find LLVM in the requested location LLVM_DIR=${LLVM_DIR_OLD}; using ${LLVM_DIR}.")
     endif()

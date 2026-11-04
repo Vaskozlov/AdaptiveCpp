@@ -1,0 +1,53 @@
+name: Offline CUDA driver and Conan packaging
+
+on:
+  push:
+    paths:
+      - 'conanfile.py'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'src/**'
+      - 'include/**'
+      - 'bin/acpp'
+      - 'third-party/nvidia/**'
+      - 'test_package/**'
+      - 'tests/packaging/**'
+      - 'tests/cuda_driver/**'
+      - '.github/workflows/conan.yml'
+  pull_request:
+    paths:
+      - 'conanfile.py'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'src/**'
+      - 'include/**'
+      - 'bin/acpp'
+      - 'third-party/nvidia/**'
+      - 'test_package/**'
+      - 'tests/packaging/**'
+      - 'tests/cuda_driver/**'
+      - '.github/workflows/conan.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-packaging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare system dependencies and Conan
+        run: docker build -t acpp-conan-check tests/packaging
+      - name: Build and package with networking disabled
+        run: |
+          mkdir -p build-packaging
+          docker run --rm --network=none \
+            -v "$PWD:/src:ro" -v "$PWD/build-packaging:/output" \
+            acpp-conan-check sh /src/tests/packaging/check_driver_offline.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: driver-packaging
+          path: build-packaging/

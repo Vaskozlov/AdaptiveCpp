@@ -21,7 +21,27 @@ if(WITH_SSCP_COMPILER AND ACPP_PACKAGE_LLVM_TOOLS)
       get_filename_component(tool_name "${ACPP_${tool}_PATH}" NAME)
       install(PROGRAMS "${tool_file}" RENAME "${tool_name}"
         DESTINATION lib/hipSYCL/ext/llvm/bin COMPONENT Runtime)
+      if(APPLE)
+        # Copied Homebrew tools use @executable_path/../lib for libLLVM, which
+        # no longer points at LLVM after installation into our runtime layout.
+        install(CODE "
+          set(ACPP_PACKAGED_LLVM_TOOL \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/lib/hipSYCL/ext/llvm/bin/${tool_name}\")
+          set(ACPP_LLVM_LIBRARY_DIRS \"${LLVM_LIBRARY_DIRS}\")
+          include(\"${ACPP_SOURCE_ROOT}/cmake/PrepareLLVMTool.cmake\")
+        " COMPONENT Runtime)
+      endif()
     endforeach()
+  endif()
+
+  find_file(ACPP_LLVM_LICENSE_FILE NAMES LICENSE.TXT copyright
+    HINTS "${LLVM_MAIN_SRC_DIR}" "${LLVM_TOOLS_BINARY_DIR}/.."
+      "${LLVM_TOOLS_BINARY_DIR}/../share/doc/llvm"
+      "${LLVM_TOOLS_BINARY_DIR}/../share/doc/llvm-${LLVM_VERSION_MAJOR}"
+      "${LLVM_TOOLS_BINARY_DIR}/../../../share/doc/llvm-${LLVM_VERSION_MAJOR}"
+    DOC "License notice for redistributed LLVM tools" NO_DEFAULT_PATH)
+  if(ACPP_LLVM_LICENSE_FILE)
+    install(FILES "${ACPP_LLVM_LICENSE_FILE}" RENAME LLVM-LICENSE.txt
+      DESTINATION share/licenses/AdaptiveCpp COMPONENT Runtime)
   endif()
 endif()
 
