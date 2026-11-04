@@ -44,7 +44,7 @@ class AdaptiveCppConan(ConanFile):
     exports = "CMakeLists.txt"
     exports_sources = (
         "CMakeLists.txt", "LICENSE", "bin/acpp", "cmake/*", "include/*",
-        "src/*", "third-party/nvidia/*", "tests/cuda_driver/*",
+        "src/*", "third-party/nvidia/*", "tests/cuda_driver/*", "tests/cuda_ptx/*",
     )
 
     def set_version(self):

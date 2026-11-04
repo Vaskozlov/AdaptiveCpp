@@ -41,6 +41,7 @@ nav:
       - 'CUDA' : 'install-cuda.md'
       - 'NVIDIA driver API' : 'install-cuda-driver.md'
       - 'Conan' : 'install-conan.md'
+      - 'Windows Conan SDK and NSIS' : 'install-conan-windows.md'
       - 'ROCM' : 'install-rocm.md'
       - 'OpenCL' : 'install-ocl.md'
       - 'Level Zero' : 'install-spirv.md'

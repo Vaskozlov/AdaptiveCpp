@@ -52,6 +52,12 @@ if(WITH_CUDA_BACKEND)
     DESTINATION share/licenses/AdaptiveCpp/nvidia COMPONENT Runtime)
 endif()
 
+# LLVM owns CPack in an integrated build. The Windows SDK packages the complete
+# LLVM/AdaptiveCpp install tree with its own distribution project.
+if(ACPP_LLVM_COMPONENT)
+  return()
+endif()
+
 set(CPACK_PACKAGE_NAME "AdaptiveCpp")
 set(CPACK_PACKAGE_VENDOR "AdaptiveCpp")
 set(CPACK_PACKAGE_CONTACT "AdaptiveCpp package maintainer")

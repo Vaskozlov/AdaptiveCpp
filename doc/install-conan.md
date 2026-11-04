@@ -1,5 +1,8 @@
 # Building and distributing AdaptiveCpp with Conan 2
 
+For a native Windows SDK with LLVM built together with AdaptiveCpp and NSIS
+installer generation, see [Windows with Conan and NSIS](install-conan-windows.md).
+
 The repository's `conanfile.py` builds a native, full-featured AdaptiveCpp
 compiler and runtime. NVIDIA support uses the driver API and the bundled
 `cuda.h` and embedded libdevice; no CUDA toolkit or NVIDIA driver is needed

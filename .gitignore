@@ -2,6 +2,7 @@
 build*/
 *-build-*/
 CMakeUserPresets.json
+recipes/adaptivecpp-llvm/sources/
 __pycache__/
 
 # vscode in-source configs

@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.23)
+project(AdaptiveCppSDKConsumer LANGUAGES CXX)
+find_package(AdaptiveCpp 25.10 CONFIG REQUIRED)
+add_executable(sdk_test main.cpp)
+target_compile_features(sdk_test PRIVATE cxx_std_17)
+add_sycl_to_target(TARGET sdk_test)

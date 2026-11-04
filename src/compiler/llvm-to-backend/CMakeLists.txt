@@ -406,7 +406,8 @@ if(WITH_SSCP_COMPILER)
       )
 
       add_custom_target(acpp-sscp-host-c-runtime-import DEPENDS "${ACPP_HOST_C_RUNTIME_IMPORT_LIBRARY}")
-      install(FILES "${ACPP_HOST_C_RUNTIME_IMPORT_LIBRARY}" DESTINATION "lib/hipSYCL")
+      install(FILES "${ACPP_HOST_C_RUNTIME_IMPORT_LIBRARY}"
+        DESTINATION "lib/hipSYCL" COMPONENT Runtime)
     endif()
 
     add_hipsycl_llvm_backend(

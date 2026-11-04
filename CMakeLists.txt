@@ -1008,6 +1008,11 @@ endif()
 install(PROGRAMS bin/acpp DESTINATION bin)
 install(PROGRAMS bin/acpp DESTINATION bin RENAME syclcc)
 install(PROGRAMS bin/acpp DESTINATION bin RENAME syclcc-clang)
+if(WIN32)
+  foreach(driver acpp syclcc syclcc-clang)
+    install(FILES cmake/acpp.cmd DESTINATION bin RENAME "${driver}.cmd")
+  endforeach()
+endif()
 
 
 install(FILES ${ACPP_BINARY_ROOT}/acpp-core.json DESTINATION ${ACPP_CONFIG_FILE_INSTALL_DIR})
@@ -1046,7 +1051,7 @@ install(PROGRAMS cmake/syclcc-launch.rule.in DESTINATION ${HIPSYCL_INSTALL_CMAKE
 
 write_basic_package_version_file(
   "${ACPP_BINARY_ROOT}/hipsycl-config-version.cmake"
-  VERSION ${hipSYCL_VERSION}
+  VERSION ${ACPP_VERSION_MAJOR}.${ACPP_VERSION_MINOR}.${ACPP_VERSION_PATCH}
   COMPATIBILITY SameMajorVersion
 )
 
@@ -1094,7 +1099,7 @@ install(PROGRAMS cmake/syclcc-launch.rule.in DESTINATION ${OPENSYCL_INSTALL_CMAK
 
 write_basic_package_version_file(
   "${ACPP_BINARY_ROOT}/opensycl-config-version.cmake"
-  VERSION ${hipSYCL_VERSION}
+  VERSION ${ACPP_VERSION_MAJOR}.${ACPP_VERSION_MINOR}.${ACPP_VERSION_PATCH}
   COMPATIBILITY SameMajorVersion
 )
 
@@ -1142,7 +1147,7 @@ install(PROGRAMS cmake/syclcc-launch.rule.in DESTINATION ${ADAPTIVECPP_INSTALL_C
 
 write_basic_package_version_file(
   "${ACPP_BINARY_ROOT}/adaptivecpp-config-version.cmake"
-  VERSION ${hipSYCL_VERSION}
+  VERSION ${ACPP_VERSION_MAJOR}.${ACPP_VERSION_MINOR}.${ACPP_VERSION_PATCH}
   COMPATIBILITY SameMajorVersion
 )
 
@@ -1180,6 +1185,15 @@ if(ACPP_BUILD_CUDA_DRIVER_TESTS)
   endif()
   enable_testing()
   add_subdirectory(tests/cuda_driver)
+endif()
+
+option(ACPP_BUILD_CUDA_PTX_TESTS "Build GPU-independent embedded libdevice PTX tests" OFF)
+if(ACPP_BUILD_CUDA_PTX_TESTS AND NOT ACPP_BUILD_CUDA_DRIVER_TESTS)
+  if(NOT WITH_SSCP_COMPILER OR NOT WITH_CUDA_BACKEND OR NOT ACPP_EMBED_CUDA_LIBDEVICE)
+    message(FATAL_ERROR "PTX tests require the SSCP CUDA backend and embedded libdevice")
+  endif()
+  enable_testing()
+  add_subdirectory(tests/cuda_ptx)
 endif()
 
 include(cmake/Packaging.cmake)

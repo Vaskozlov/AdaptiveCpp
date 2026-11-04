@@ -1,0 +1,66 @@
+name: Windows Conan SDK and NSIS
+
+on:
+  pull_request:
+    paths:
+      - 'recipes/adaptivecpp-llvm/**'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'src/**'
+      - 'include/**'
+      - 'bin/**'
+      - 'third-party/nvidia/**'
+      - 'tests/packaging/**'
+      - '.github/workflows/conan-windows.yml'
+  push:
+    paths:
+      - 'recipes/adaptivecpp-llvm/**'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'src/**'
+      - 'include/**'
+      - 'bin/**'
+      - 'third-party/nvidia/**'
+      - 'tests/packaging/**'
+      - '.github/workflows/conan-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sdk:
+    runs-on: windows-2022
+    timeout-minutes: 240
+    env:
+      CONAN_HOME: C:\acpp-conan
+    steps:
+      - uses: actions/checkout@v7
+      - uses: TheMrMilchmann/setup-msvc-dev@v4
+        with:
+          arch: x64
+      - uses: ZhongRuoyu/setup-llvm@v0.2.0
+        with:
+          llvm-version: '19.1.7'
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install build and installer tools
+        shell: pwsh
+        run: |
+          python -m pip install conan==2.34.0 cmake==3.31.6 ninja==1.12.1
+          if ($LASTEXITCODE -ne 0) { throw 'Build tool installation failed' }
+          choco install nsis --version=3.11 --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'NSIS installation failed' }
+          "${env:ProgramFiles(x86)}\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Append
+      - name: Check SDK recipe
+        run: python tests/packaging/test_windows_sdk.py
+      - name: Build, consume, install and uninstall SDK
+        shell: pwsh
+        run: |
+          ./tests/packaging/check_windows_sdk.ps1 -OutputDirectory C:/acpp-sdk -BlockBuildNetwork
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: adaptivecpp-windows-x64-sdk
+          path: C:/acpp-sdk/artifacts/
