@@ -22,10 +22,14 @@ CPack's Runtime/Development DEBs.
 ## Prerequisites
 
 Use a Visual Studio 2022 Developer PowerShell with the x64 C++ Build Tools and
-Windows SDK available. Install bootstrap LLVM/Clang **19.1.7**, Python 3,
+Windows SDK available. Install bootstrap LLVM/Clang **19**, Python 3,
 Conan **2.8 or newer**, CMake **3.23 or newer**, and Ninja. Building an integrated
 LLVM SDK needs substantial disk space and time; use short build/cache paths.
 NSIS is needed only for `.exe` installer generation.
+
+CI's LLVM setup action accepts a major version and installs the latest Clang 19
+release as the bootstrap compiler. The SDK's own LLVM source remains pinned to
+19.1.7 in `conandata.yml`.
 
 The native CI pins Conan 2.34.0, CMake 3.31.6, Ninja 1.12.1, and NSIS 3.11.
 For example, after installing VS Build Tools and LLVM:

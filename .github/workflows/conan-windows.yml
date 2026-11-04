@@ -41,7 +41,9 @@ jobs:
           arch: x64
       - uses: ZhongRuoyu/setup-llvm@v0.2.0
         with:
-          llvm-version: '19.1.7'
+          # This action accepts major versions only. The SDK's LLVM source
+          # release is pinned separately in the recipe's conandata.yml.
+          llvm-version: '19'
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
